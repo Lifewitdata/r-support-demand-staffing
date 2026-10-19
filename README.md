@@ -6,6 +6,8 @@ This R and Shiny project joins demand forecasts with handling-time and staffing 
 
 All data are synthetic. This is an independent portfolio project, not Uber data, an Uber deployment or evidence of business savings.
 
+**Live weekly report:** <https://lifewitdata.github.io/r-support-demand-staffing/> — the generated report, hosted from this repository. No sign-in needed. The interactive Shiny dashboard is not hosted; run it locally as below.
+
 ![Forecast overview](outputs/figures/forecast.png)
 
 ## Open the project
@@ -100,7 +102,7 @@ Hourly gaps sum to **paid agent-hours**, not full-time hires. The planner does n
 
 `app.R` sits at the repository root. A deployment needs `R/`, `config/`, `www/`, `data/processed/app_bundle.rds` and `outputs/weekly_brief.md`. Prepared app data are committed deliberately so the dashboard opens without a rebuild. The raw ticket file is not needed at runtime; it is kept for reproducibility.
 
-The app expects its working directory to be the repository root, as RStudio Run App and standard Shiny deployment do. Install dependencies before launching. No hosted version of the app is currently published.
+The app expects its working directory to be the repository root, as RStudio Run App and standard Shiny deployment do. Install dependencies before launching. `outputs/weekly_report.html` and its figures are published through GitHub Pages from the repository root, so the report is readable without running R; the interactive app is not hosted.
 
 ## Weekly refresh
 
