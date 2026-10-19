@@ -1,0 +1,4 @@
+queue,method,coverage,mean_width
+Account support,seasonal_glm,0.920634920634921,21.5923948152153
+Fare questions,seasonal_glm,0.898809523809524,39.8241176951494
+Payment issues,seasonal_glm,0.918650793650794,28.1086958889461

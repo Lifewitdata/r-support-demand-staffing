@@ -1,0 +1,9 @@
+Package: SupportStaffingPortfolio
+Type: Project
+Title: Support Demand Forecasting and Staffing Planner
+Version: 1.0.0
+Description: Independent synthetic operations analytics project with R and Shiny.
+    Reproducible forecasting, workload diagnostics and capacity scenarios.
+Depends: R (>= 4.3.0)
+Imports: data.table, ggplot2, shiny, htmltools
+Encoding: UTF-8

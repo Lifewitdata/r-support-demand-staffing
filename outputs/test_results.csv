@@ -1,0 +1,29 @@
+test,passed,message
+Source checks all pass,TRUE,OK
+Hourly ticket counts reconcile,TRUE,OK
+Hourly grid has zero-filled hours,TRUE,OK
+Simple backlog flow conserves workload,TRUE,OK
+Opening backlog is carried forward,TRUE,OK
+Negative capacity is rejected,TRUE,OK
+Weekly baseline repeats only the last week,TRUE,OK
+Known accuracy example is correct,TRUE,OK
+All held-out predictions follow training,TRUE,OK
+Model choice follows earlier validation scores,TRUE,OK
+Calibration is earlier than the held-out windows,TRUE,OK
+Missing forecast queue blocks recommendations,TRUE,OK
+Missing forecast value blocks recommendations,TRUE,OK
+Invalid forecast interval is rejected,TRUE,OK
+Missing scheduled hour blocks recommendations,TRUE,OK
+Zero occupancy cannot produce an answer,TRUE,OK
+Higher demand cannot reduce required capacity,TRUE,OK
+Longer handling cannot reduce required capacity,TRUE,OK
+Greater shrinkage cannot reduce required capacity,TRUE,OK
+Extra staff cannot increase end backlog,TRUE,OK
+Upper demand scenario is no smaller than central,TRUE,OK
+Backlog allocation equals opening workload,TRUE,OK
+Workload decomposition reconciles exactly,TRUE,OK
+Report wording handles increases and decreases,TRUE,OK
+"CSV exports write ISO timestamps, not epoch seconds",TRUE,OK
+HTML report keeps its head and charset,TRUE,OK
+Shiny queue selection and scenario controls update,TRUE,OK
+Root app loads without starting a server,TRUE,OK

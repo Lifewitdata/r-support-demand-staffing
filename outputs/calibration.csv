@@ -1,0 +1,4 @@
+queue,method,radius
+Account support,seasonal_glm,2.10936715592674
+Fare questions,seasonal_glm,2.60951574438849
+Payment issues,seasonal_glm,2.27059507167327

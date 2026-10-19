@@ -1,0 +1,108 @@
+1. Data grain and coverage
+             queue  rows      first                last tickets
+            <char> <int>     <POSc>              <POSc>   <int>
+1: Account support  4368 2026-01-05 2026-07-05 23:00:00  107127
+2:  Fare questions  4368 2026-01-05 2026-07-05 23:00:00  236243
+3:  Payment issues  4368 2026-01-05 2026-07-05 23:00:00  152833
+
+2. Weighted handling time and workload
+             queue       aht workload_hours capacity_hours
+            <char>     <num>          <num>          <num>
+1: Account support 17.029737       30405.74       33589.88
+2:  Fare questions  8.986222       35382.20       38991.41
+3:  Payment issues 13.308960       33900.81       35862.56
+
+3. Weekly and daily demand patterns
+              queue   dow mean_arrivals
+             <char> <int>         <num>
+ 1: Account support     1      23.30609
+ 2: Account support     2      23.14583
+ 3: Account support     3      22.89263
+ 4: Account support     4      23.09936
+ 5: Account support     5      23.21314
+ 6: Account support     6      28.16506
+ 7: Account support     7      27.85577
+ 8:  Fare questions     1      50.86058
+ 9:  Fare questions     2      51.44071
+10:  Fare questions     3      50.82372
+11:  Fare questions     4      50.89423
+12:  Fare questions     5      51.68750
+13:  Fare questions     6      61.13782
+14:  Fare questions     7      61.75000
+15:  Payment issues     1      32.47917
+16:  Payment issues     2      32.78045
+17:  Payment issues     3      32.56571
+18:  Payment issues     4      32.39583
+19:  Payment issues     5      33.81731
+20:  Payment issues     6      40.57212
+21:  Payment issues     7      40.31410
+              queue   dow mean_arrivals
+             <char> <int>         <num>
+             queue  hour mean_arrivals
+            <char> <int>         <num>
+1: Account support    12      39.52198
+2: Account support    13      38.24725
+3: Account support    11      38.01099
+4:  Fare questions    12      87.01099
+5:  Fare questions    11      86.11538
+6:  Fare questions    13      85.21429
+7:  Payment issues    12      55.27473
+8:  Payment issues    11      55.26923
+9:  Payment issues    13      53.07692
+
+4. Highest observed hourly volumes
+              timestamp          queue arrivals aht_minutes
+                 <POSc>         <char>    <int>       <num>
+ 1: 2026-05-30 11:00:00 Fare questions      160    9.152256
+ 2: 2026-07-04 13:00:00 Fare questions      150    8.252233
+ 3: 2026-06-28 13:00:00 Fare questions      147    8.539973
+ 4: 2026-06-21 11:00:00 Fare questions      143    8.654098
+ 5: 2026-07-05 13:00:00 Fare questions      142    8.576070
+ 6: 2026-06-28 12:00:00 Fare questions      141    9.057603
+ 7: 2026-06-30 12:00:00 Fare questions      139    9.651525
+ 8: 2026-05-17 11:00:00 Payment issues      139   12.712633
+ 9: 2026-05-17 12:00:00 Payment issues      139   13.092784
+10: 2026-04-18 12:00:00 Fare questions      138    8.453478
+
+5. Latest workload change: volume versus handling time
+Key: <queue>
+             queue     n      work  capacity      n0    work0 capacity0
+            <char> <int>     <num>     <num>   <num>    <num>     <num>
+1: Account support  4725  79501.43  87095.25 4507.75 76821.18  84981.94
+2:  Fare questions 10406  92836.57 101247.75 9969.25 89713.12  98838.00
+3:  Payment issues  6463 108431.86  93062.25 6323.00 87942.80  90805.50
+         aht      aht0 demand_contribution handling_contribution
+       <num>     <num>               <num>                 <num>
+1: 16.825700 17.042024            3678.882             -998.6330
+2:  8.921447  8.998984            3913.374             -789.9236
+3: 16.777327 13.908398            2148.001            18341.0582
+   workload_change capacity_change
+             <num>           <num>
+1:        2680.248        2113.312
+2:        3123.450        2409.750
+3:       20489.059        2256.750
+
+6. Validation, model comparison and later-week accuracy
+             queue       method       MAE      RMSE      WAPE       bias
+            <char>       <char>     <num>     <num>     <num>      <num>
+1:  Fare questions weekly_naive 12.599206 16.408476 0.2150574 -0.7301587
+2:  Fare questions seasonal_glm  9.546381 12.322014 0.1629484 -1.4263533
+3:  Payment issues weekly_naive 15.309524 21.565791 0.3755293 -0.3849206
+4:  Payment issues seasonal_glm 10.524056 15.604668 0.2581459 -2.5289745
+5: Account support weekly_naive  7.656746 10.037924 0.2958448 -0.3710317
+6: Account support seasonal_glm  5.407888  6.970149 0.2089525  0.2283027
+             queue       method       MAE      RMSE      WAPE       bias
+            <char>       <char>     <num>     <num>     <num>      <num>
+1:  Fare questions weekly_naive 12.702381 17.433775 0.2091815 -1.1190476
+2:  Fare questions seasonal_glm  9.465111 12.635614 0.1558705 -0.3297256
+3:  Payment issues weekly_naive  9.085317 11.653479 0.2380556 -0.3313492
+4:  Payment issues seasonal_glm  6.690677  8.747983 0.1753107  1.5709850
+5: Account support weekly_naive  7.224206  9.646839 0.2625090 -0.4623016
+6: Account support seasonal_glm  5.168449  6.733155 0.1878081 -0.3274132
+             queue       method  coverage mean_width
+            <char>       <char>     <num>      <num>
+1: Account support seasonal_glm 0.9206349   21.59239
+2:  Fare questions seasonal_glm 0.8988095   39.82412
+3:  Payment issues seasonal_glm 0.9186508   28.10870
+
+Interpretation: arithmetic workload drivers are not causal process effects. See the weekly brief for actions and limitations.

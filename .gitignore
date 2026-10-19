@@ -1,0 +1,7 @@
+.Rhistory
+.RData
+.Rproj.user/
+renv/library/
+renv/staging/
+*.log
+# Prepared app data are deliberately included so the Shiny app opens after upload.

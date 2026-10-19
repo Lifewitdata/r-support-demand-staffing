@@ -1,0 +1,4 @@
+queue,forecast_arrivals,required_paid_agent_hours,scheduled_paid_agent_hours,uncovered_agent_hours,hours_with_gap,peak_gap,opening_backlog_hours,ending_backlog_hours
+Account support,4686.24193097692,2149,2277,14,13,2,0,0
+Fare questions,10385.8100970515,2526,2647,23,23,1,0.834983333333334,0
+Payment issues,6727.39008974601,3442,2433,1009,157,15,474.291616666667,589.280234884768
