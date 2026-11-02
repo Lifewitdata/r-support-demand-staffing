@@ -77,8 +77,9 @@ class GroqAPIError(RuntimeError):
 
 
 def groq_chat(messages: list[dict[str, str]], *, model: str = DEFAULT_MODEL,
-              temperature: float = 0.1, max_tokens: int = 900, timeout: int = 45) -> str:
-    api_key = os.getenv("GROQ_API_KEY")
+              temperature: float = 0.1, max_tokens: int = 900, timeout: int = 45,
+              api_key: str | None = None) -> str:
+    api_key = api_key or os.getenv("GROQ_API_KEY")
     if not api_key: raise GroqAPIError("GROQ_API_KEY is not set. Configure it in the app environment.", kind="config")
     try:
         response = requests.post(GROQ_URL,
@@ -131,14 +132,15 @@ def list_models(*, timeout: int = 20) -> list[str]:
         response.close()
 
 def answer_analytics_question(question: str, db_path: str | Path = DB_PATH, *,
-                              analytics: tuple[str, list[dict[str, Any]]] | None = None) -> dict[str, Any]:
+                              analytics: tuple[str, list[dict[str, Any]]] | None = None,
+                              api_key: str | None = None) -> dict[str, Any]:
     intent, rows = analytics if analytics is not None else fetch_analytics(question, db_path)
     if not rows: return {"intent": intent, "facts": rows, "answer": "No matching analytics rows were found."}
     messages = [
         {"role": "system", "content": "You are an operations analytics assistant. Explain only supplied database facts. Do not invent causes, metrics, dates, SLAs or recommendations. Distinguish association from causation. Be concise and mention caveats."},
         {"role": "user", "content": f"Question: {redact_direct_identifiers(question)}\nAnalysis: {intent}\nDatabase results (JSON): {json.dumps(rows, allow_nan=False)}"}
     ]
-    return {"intent": intent, "facts": rows, "answer": groq_chat(messages)}
+    return {"intent": intent, "facts": rows, "answer": groq_chat(messages, api_key=api_key)}
 
 def redact_direct_identifiers(text: str) -> str:
     text = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}", "[EMAIL]", str(text))
