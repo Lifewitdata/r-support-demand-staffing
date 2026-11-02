@@ -33,10 +33,10 @@ def validate_chats(df):
 def build_forecast(hourly):
     preds=[]; scores=[]
     for keys,g in hourly.groupby(['region','language','channel']):
-        g=g.sort_values('hour_utc').copy(); g['hour']=g.hour_utc.dt.hour; g['dow']=g.hour_utc.dt.dayofweek
+        g=g.sort_values('hour_utc').copy(); full=pd.date_range(g.hour_utc.min(),g.hour_utc.max(),freq='h'); g=g.set_index('hour_utc').reindex(full).rename_axis('hour_utc').reset_index(); g['region']=keys[0]; g['language']=keys[1]; g['channel']=keys[2]; g['chats']=g.chats.fillna(0); g['event_rate']=g.event_rate.fillna(0); g['campaign_rate']=g.campaign_rate.fillna(0); g['holiday_rate']=g.holiday_rate.fillna(0); g['launch_rate']=g.launch_rate.fillna(0); g['incident_rate']=g.incident_rate.fillna(0); g['hour']=g.hour_utc.dt.hour; g['dow']=g.hour_utc.dt.dayofweek
         g['lag24']=g.chats.shift(24); g['lag168']=g.chats.shift(168); g['roll24']=g.chats.shift(1).rolling(24,min_periods=6).mean(); g=g.dropna().reset_index(drop=True)
         if len(g)<72: continue
-        cut=max(24,int(len(g)*.8)); tr=g.iloc[:cut]; te=g.iloc[cut:]; features=['hour','dow','lag24','lag168','roll24']
+        cut=max(24,int(len(g)*.8)); tr=g.iloc[:cut]; te=g.iloc[cut:]; features=['hour','dow','lag24','lag168','roll24','event_rate','campaign_rate','holiday_rate','launch_rate','incident_rate']
         if len(tr)>=100:
             model=RandomForestRegressor(n_estimators=100,max_depth=9,min_samples_leaf=3,random_state=42,n_jobs=-1); model.fit(tr[features],tr.chats); p=np.maximum(0,model.predict(te[features])); name='random_forest'
         else: p=np.maximum(0,te.lag168.fillna(te.lag24).to_numpy()); name='seasonal_naive'
@@ -47,7 +47,7 @@ def run_pipeline(days=210,chats_per_day=190):
     RAW.mkdir(parents=True,exist_ok=True); OUT.mkdir(parents=True,exist_ok=True); df=generate_data(days=days,chats_per_day=chats_per_day); validate_chats(df)
     df.to_csv(RAW/'conversations.csv',index=False); pd.DataFrame([{'rows':len(df),'status':'PASS'}]).to_csv(OUT/'data_quality.csv',index=False)
     db=OUT/'commerce_analytics.duckdb'; con=duckdb.connect(str(db)); con.register('incoming',df); con.execute('CREATE OR REPLACE TABLE conversations AS SELECT * FROM incoming'); con.execute((ROOT/'sql'/'analytics.sql').read_text())
-    names=['hourly_commerce','staffing_coverage','service_commercial_risk','root_cause_decomposition','daily_kpis','weekly_kpis','monthly_kpis']
+    names=['hourly_commerce','staffing_coverage','service_commercial_risk','operational_anomalies','root_cause_decomposition','daily_kpis','weekly_kpis','monthly_kpis']
     exports={}
     for name in names:
         x=con.execute('SELECT * FROM '+name).df(); x.to_csv(OUT/('tableau_'+name+'.csv'),index=False); exports[name]=len(x)
