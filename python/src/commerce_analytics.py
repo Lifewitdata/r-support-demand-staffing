@@ -135,6 +135,49 @@ def build_forecast(hourly):
         y=te.chats.to_numpy(); scores.append({'region':keys[0],'language':keys[1],'channel':keys[2],'model':name,'holdout_hours':len(te),'mae':mean_absolute_error(y,p),'rmse':mean_squared_error(y,p)**.5,'wape':np.abs(y-p).sum()/max(y.sum(),1)})
         preds.append(pd.DataFrame({'hour_utc':te.hour_utc,'region':keys[0],'language':keys[1],'channel':keys[2],'actual_chats':y,'predicted_chats':np.round(p,2),'model':name}))
     return (pd.concat(preds,ignore_index=True) if preds else pd.DataFrame(),pd.DataFrame(scores))
+def build_future_forecast(hourly, events=None, horizon_hours=168):
+    if horizon_hours<1: raise ValueError('horizon_hours must be positive')
+    event_cols=['event_rate','campaign_rate','holiday_rate','launch_rate','incident_rate']
+    features=['hour','dow','lag24','lag168','roll24']+event_cols
+    results=[]
+    for keys,g in hourly.groupby(['region','language','channel']):
+        g=g.sort_values('hour_utc').copy()
+        for col in event_cols:
+            if col not in g: g[col]=0.0
+        full=pd.date_range(pd.to_datetime(g.hour_utc,utc=True).min(),pd.to_datetime(g.hour_utc,utc=True).max(),freq='h')
+        g=g.set_index('hour_utc').reindex(full).rename_axis('hour_utc').reset_index()
+        g['chats']=g.chats.fillna(0)
+        for col in event_cols: g[col]=g[col].fillna(0)
+        g['hour']=g.hour_utc.dt.hour; g['dow']=g.hour_utc.dt.dayofweek
+        g['lag24']=g.chats.shift(24); g['lag168']=g.chats.shift(168)
+        g['roll24']=g.chats.shift(1).rolling(24,min_periods=6).mean()
+        train=g.dropna(subset=['lag24','lag168','roll24'])
+        model=None; model_name='seasonal_naive'
+        if len(train)>=100:
+            model=RandomForestRegressor(n_estimators=100,max_depth=9,min_samples_leaf=3,random_state=42,n_jobs=-1)
+            model.fit(train[features],train.chats); model_name='random_forest'
+        history=list(g.chats.astype(float)); last=g.hour_utc.max()
+        future=pd.DataFrame({'hour_utc':pd.date_range(last+pd.Timedelta(hours=1),periods=horizon_hours,freq='h'),
+                             'region':keys[0],'language':keys[1],'channel':keys[2]})
+        for col in event_cols: future[col]=0.0
+        future=apply_event_calendar(future,events)
+        for _,row in future.iterrows():
+            lag24=history[-24] if len(history)>=24 else float(np.mean(history))
+            lag168=history[-168] if len(history)>=168 else lag24
+            roll24=float(np.mean(history[-24:]))
+            x=pd.DataFrame([{'hour':row.hour_utc.hour,'dow':row.hour_utc.dayofweek,'lag24':lag24,
+                             'lag168':lag168,'roll24':roll24,
+                             'event_rate':row.event_rate,'campaign_rate':row.campaign_rate,
+                             'holiday_rate':row.holiday_rate,'launch_rate':row.launch_rate,
+                             'incident_rate':row.incident_rate}])
+            value=max(0.0,float(model.predict(x[features])[0])) if model is not None else max(0.0,float(lag168))
+            history.append(value)
+            results.append({'hour_utc':row.hour_utc,'region':keys[0],'language':keys[1],
+                            'channel':keys[2],'predicted_chats':round(value,2),'model':model_name,
+                            'campaign_rate':row.campaign_rate,'holiday_rate':row.holiday_rate,
+                            'launch_rate':row.launch_rate,'incident_rate':row.incident_rate})
+    return pd.DataFrame(results)
+
 def run_pipeline(days=210,chats_per_day=190,input_path=None,events_path=None):
     RAW.mkdir(parents=True,exist_ok=True); OUT.mkdir(parents=True,exist_ok=True)
     df=load_input_csv(input_path) if input_path else generate_data(days=days,chats_per_day=chats_per_day)
@@ -148,7 +191,7 @@ def run_pipeline(days=210,chats_per_day=190,input_path=None,events_path=None):
     exports={}
     for name in names:
         x=con.execute('SELECT * FROM '+name).df(); x.to_csv(OUT/('tableau_'+name+'.csv'),index=False); exports[name]=len(x)
-    hourly=con.execute('SELECT * FROM hourly_commerce').df(); hourly=apply_event_calendar(hourly,events); pred,score=build_forecast(hourly); pred.to_csv(OUT/'forecast_holdout.csv',index=False); score.to_csv(OUT/'forecast_scores.csv',index=False)
+    hourly=con.execute('SELECT * FROM hourly_commerce').df(); hourly=apply_event_calendar(hourly,events); pred,score=build_forecast(hourly); pred.to_csv(OUT/'forecast_holdout.csv',index=False); score.to_csv(OUT/'forecast_scores.csv',index=False); future=build_future_forecast(hourly,events,168); future.to_csv(OUT/'forecast_next_7_days.csv',index=False)
     daily=con.execute('SELECT * FROM daily_kpis').df(); weekly=con.execute('SELECT * FROM weekly_kpis').df(); monthly=con.execute('SELECT * FROM monthly_kpis').df(); risks=con.execute('SELECT * FROM service_commercial_risk').df()
     daily.to_csv(OUT/'daily_tracker.csv',index=False)
     if not weekly.empty:
