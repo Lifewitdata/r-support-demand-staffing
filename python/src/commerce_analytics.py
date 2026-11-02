@@ -141,11 +141,11 @@ def run_pipeline(days=210,chats_per_day=190,input_path=None,events_path=None):
     df=_with_local_hour(df); dq=validate_chats(df)
     df.to_csv(RAW/'conversations.csv',index=False); dq.to_csv(OUT/'data_quality.csv',index=False)
     db=OUT/'commerce_analytics.duckdb'; con=duckdb.connect(str(db)); con.register('incoming',df); con.execute('CREATE OR REPLACE TABLE conversations AS SELECT * FROM incoming'); con.execute((ROOT/'sql'/'analytics.sql').read_text())
-    names=['hourly_commerce','staffing_coverage','service_commercial_risk','operational_anomalies','root_cause_decomposition','daily_kpis','weekly_kpis','monthly_kpis']
+    names=['hourly_commerce','staffing_coverage','service_commercial_risk','operational_anomalies','root_cause_decomposition','daily_kpis','weekly_kpis','monthly_kpis','data_reconciliation','event_calendar_impact']
     exports={}
     for name in names:
         x=con.execute('SELECT * FROM '+name).df(); x.to_csv(OUT/('tableau_'+name+'.csv'),index=False); exports[name]=len(x)
-    hourly=con.execute('SELECT * FROM hourly_commerce').df(); events=load_event_calendar(events_path) if events_path else None; hourly=apply_event_calendar(hourly,events); pred,score=build_forecast(hourly); pred.to_csv(OUT/'forecast_holdout.csv',index=False); score.to_csv(OUT/'forecast_scores.csv',index=False)
+    hourly=con.execute('SELECT * FROM hourly_commerce').df(); events=load_event_calendar(events_path) if events_path else pd.DataFrame(columns=['event_id','region','language','channel','event_type','start_utc','end_utc']); con.register('event_input',events); con.execute('CREATE OR REPLACE TABLE event_calendar AS SELECT * FROM event_input'); hourly=apply_event_calendar(hourly,events); pred,score=build_forecast(hourly); pred.to_csv(OUT/'forecast_holdout.csv',index=False); score.to_csv(OUT/'forecast_scores.csv',index=False)
     daily=con.execute('SELECT * FROM daily_kpis').df(); weekly=con.execute('SELECT * FROM weekly_kpis').df(); monthly=con.execute('SELECT * FROM monthly_kpis').df(); risks=con.execute('SELECT * FROM service_commercial_risk').df()
     daily.to_csv(OUT/'daily_tracker.csv',index=False)
     if not weekly.empty:
