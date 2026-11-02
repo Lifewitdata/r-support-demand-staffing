@@ -1,5 +1,7 @@
 # How the project maps to an Uber Data Analytics role
 
+The table below describes the original R/Shiny component. The complementary Python/DuckDB implementation, optional Groq explanations, Streamlit interface and Tableau-ready CSV extracts are documented in [python/README.md](../python/README.md). No Tableau workbook or live customer-support integration is claimed.
+
 | Job responsibility | Evidence in this project |
 |---|---|
 | Automated reports and a single source of truth | One R pipeline builds the hourly operations table, forecast bundle, dashboard snapshot and weekly brief from documented source grains. |

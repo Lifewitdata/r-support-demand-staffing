@@ -1,0 +1,70 @@
+name: Python analytics checks
+on:
+  push:
+    branches: [main]
+    paths: ['python/**', '.github/workflows/python-analytics.yml']
+  pull_request:
+    paths: ['python/**', '.github/workflows/python-analytics.yml']
+  workflow_dispatch:
+  schedule:
+    - cron: '17 2 * * *'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.14']
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: python/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pip check
+      - name: Unit, mocked API and real DuckDB SQL tests
+        run: python -m pytest tests -q --junitxml=outputs/test-results.xml
+      - name: Archive test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-test-results-${{ matrix.python-version }}
+          path: python/outputs/test-results.xml
+          if-no-files-found: error
+          retention-days: 14
+  analytics:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: python/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - name: Fast end-to-end smoke test on code changes
+        if: github.event_name != 'schedule'
+        run: python src/commerce_analytics.py --days 14 --chats-per-day 30 --events config/events.example.csv
+      - name: Full daily synthetic analytics refresh
+        if: github.event_name == 'schedule'
+        run: python src/commerce_analytics.py --days 210 --chats-per-day 190 --events config/events.example.csv
+      - name: Archive validated analytics outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: commerce-analytics-outputs
+          path: python/outputs/
+          if-no-files-found: error
+          retention-days: 14
