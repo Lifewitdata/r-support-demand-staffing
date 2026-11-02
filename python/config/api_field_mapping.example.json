@@ -1,0 +1,20 @@
+{
+  "chat_id": "id",
+  "arrived_at_utc": "created_at",
+  "region": "region",
+  "language": "language",
+  "channel": "channel",
+  "market": "market",
+  "team": "team",
+  "local_timezone": "timezone",
+  "event_type": "event_type",
+  "concurrency": "concurrency",
+  "first_response_minutes": "first_response_minutes",
+  "handling_minutes": "handling_minutes",
+  "resolved": "resolved",
+  "csat": "csat",
+  "converted": "converted",
+  "revenue": "revenue",
+  "contact_reason": "contact_reason",
+  "escalated": "escalated"
+}
