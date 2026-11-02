@@ -4,7 +4,7 @@ SELECT date_trunc('hour',arrived_at_utc) AS hour_utc,region,language,channel,cou
  avg(handling_minutes) AS avg_handling_minutes,sum(handling_minutes) AS handling_minutes,avg(resolved::INT) AS resolution_rate,
  avg(csat) AS avg_csat,avg(converted::INT) AS conversion_rate,sum(revenue) AS converted_revenue,avg(concurrency) AS avg_concurrency,
  sum(escalated) AS escalations,count(*) FILTER(WHERE event_type<>'none') AS event_chats,
- avg((event_type<>'none')::INT) AS event_rate,avg((event_type='incident')::INT) AS incident_rate
+ avg((event_type<>'none')::INT) AS event_rate,avg((event_type='incident')::INT) AS incident_rate,avg((event_type='campaign')::INT) AS campaign_rate,avg((event_type='holiday')::INT) AS holiday_rate,avg((event_type='product_launch')::INT) AS launch_rate
 FROM conversations GROUP BY 1,2,3,4;
 -- Illustrative assumptions: 85% occupancy, 25% shrinkage, $24 loaded agent-hour.
 CREATE OR REPLACE VIEW staffing_coverage AS
