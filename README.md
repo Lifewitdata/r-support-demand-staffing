@@ -111,3 +111,12 @@ Running `Rscript scripts/run_pipeline.R` rebuilds the complete synthetic demonst
 ## Why it fits an operations analytics role
 
 It demonstrates repeatable reporting, statistical modelling, operational deep dives, decision tools and clear handoff documentation. It does not claim stakeholder management, mentoring, measured process impact or production deployment that did not happen. See `docs/JD_alignment.md` for the precise mapping.
+
+
+## Conversational commerce analytics (Python + SQL)
+
+The repository now includes a complementary Python/DuckDB analytical layer under `python/`. It adds a synthetic chat-level fact table, region-language-channel KPI grain, chronological segment forecasting, shift-pattern coverage estimates, break-adjusted capacity, operational anomaly flags, service/commercial risk alerts, workload decomposition, management reports and Tableau-ready CSV extracts.
+
+Start with [`python/README.md`](python/README.md) for setup and run instructions, [`python/docs/analytics_design.md`](python/docs/analytics_design.md) for KPI definitions and governance, and [`python/sql/analytics.sql`](python/sql/analytics.sql) for the SQL semantic layer. CI runs Python tests and a small end-to-end pipeline smoke test.
+
+All newly generated conversation data and staffing assumptions are synthetic. Staffing shifts are illustrative coverage scenarios, not an optimized employee roster or labour-compliance system. Risk thresholds are examples, not contracted SLAs. Root-cause decomposition is descriptive, not causal. Tableau workbooks will be built after the analytics outputs and validation are signed off.
