@@ -1,7 +1,7 @@
 name: Python analytics checks
 on:
   push:
-    branches: [main, feature/conversational-commerce-python-sql]
+    branches: [main]
     paths: ['python/**', '.github/workflows/python-analytics.yml']
   pull_request:
     paths: ['python/**', '.github/workflows/python-analytics.yml']
