@@ -10,14 +10,16 @@ This Python/DuckDB layer extends the existing R/Shiny support-demand project. Al
     # macOS/Linux: source .venv/bin/activate
     pip install -r requirements.txt
     python src/commerce_analytics.py
+    # Or use a real, approved CSV that follows the documented field contract:
+    python src/commerce_analytics.py --input data/raw/approved_conversations.csv
     pytest -q
 
-The pipeline generates chat-level records, validates the ingestion contract, loads DuckDB, runs the SQL semantic layer, evaluates segment-specific chronological holdout forecasts and exports Tableau-ready CSVs.
+The pipeline can generate reproducible synthetic chat records or ingest an approved chat-level CSV with `--input`. It validates the full field contract (including region-language consistency, UTC timestamps, IANA timezones, outcome flags and metric ranges), loads DuckDB, runs the SQL semantic layer, evaluates segment-specific chronological holdout forecasts and exports Tableau-ready CSVs.
 
 ## Data model
 
 - Conversation fact: one row per chat_id, with UTC timestamp, region, language, channel, market, team, timezone, concurrency, first response, handling, resolution, CSAT, conversion, revenue, reason and escalation.
-- Hourly KPI grain: UTC hour x region x language x channel.
+- Hourly KPI grain: complete UTC hour x region x language x channel calendar, including zero-chat hours. Local hour is derived from the row's IANA timezone rather than copied from UTC.
 - Daily, weekly and monthly grains: reporting period x region x language x channel.
 - Timezone is retained for local reporting. Convert UTC to local time with timezone-aware IANA rules in a production source adapter.
 
@@ -35,4 +37,4 @@ Use outputs/tableau_hourly_commerce.csv, tableau_staffing_coverage.csv, tableau_
 
 ## Ingestion contract
 
-Replace generate_data() with a source adapter that writes the same column contract. Run validate_chats() before loading. Reject invalid batches; do not silently impute missing region or language. Production ingestion should log source, extraction timestamp, row count and checksum.
+Use `--input path/to/file.csv` to ingest an approved CSV. Required fields are: chat_id, arrived_at_utc, region, language, channel, market, team, local_timezone, event_type, concurrency, first_response_minutes, handling_minutes, resolved, csat, converted, revenue, contact_reason and escalated. `local_hour` is recalculated from UTC and the IANA timezone. Invalid batches are rejected; missing region/language is never silently imputed. A live API connector, scheduler, source checksum and atomic production publishing are not included.
