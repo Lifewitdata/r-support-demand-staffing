@@ -1,0 +1,24 @@
+name: Python analytics checks
+on:
+  push:
+    branches: [main, feature/conversational-commerce-python-sql]
+    paths: ['python/**', '.github/workflows/python-analytics.yml']
+  pull_request:
+    paths: ['python/**', '.github/workflows/python-analytics.yml']
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: python/requirements.txt
+      - run: pip install -r requirements.txt
+      - run: pytest -q
+      - run: python src/commerce_analytics.py --days 14 --chats-per-day 30
