@@ -8,18 +8,23 @@ SELECT date_trunc('hour',arrived_at_utc) AS hour_utc,region,language,channel,cou
 FROM conversations GROUP BY 1,2,3,4;
 -- Illustrative assumptions: 85% occupancy, 25% shrinkage, $24 loaded agent-hour.
 CREATE OR REPLACE VIEW staffing_coverage AS
-WITH d AS (SELECT *,ceil(chats*avg_handling_minutes/(60.0*.85*.75)) AS required_agents FROM hourly_commerce),
-s AS (SELECT *,CASE WHEN extract(hour FROM hour_utc)>=7 AND extract(hour FROM hour_utc)<15 THEN 'Day 07-15'
+WITH demand AS (SELECT *,chats*avg_handling_minutes/(60.0*.85*.75) AS required_agent_equiv,
+ sum(handling_minutes) OVER(PARTITION BY hour_utc,region,language) AS pool_workload_minutes FROM hourly_commerce),
+pool_schedule AS (SELECT DISTINCT hour_utc,region,language,
+ CASE WHEN extract(hour FROM hour_utc)>=7 AND extract(hour FROM hour_utc)<15 THEN 'Day 07-15'
  WHEN extract(hour FROM hour_utc)>=15 AND extract(hour FROM hour_utc)<23 THEN 'Evening 15-23' ELSE 'Night 23-07' END AS shift_pattern,
  CASE WHEN extract(hour FROM hour_utc)>=7 AND extract(hour FROM hour_utc)<15 THEN 3
- WHEN extract(hour FROM hour_utc)>=15 AND extract(hour FROM hour_utc)<23 THEN 2 ELSE 1 END AS rostered_agents FROM d)
-SELECT *,rostered_agents AS scheduled_agents,
- greatest(0,rostered_agents-ceil(rostered_agents*.10)) AS break_adjusted_agents,
- greatest(0,required_agents-greatest(0,rostered_agents-ceil(rostered_agents*.10))) AS agent_gap,
- greatest(0,greatest(0,rostered_agents-ceil(rostered_agents*.10))-required_agents) AS overstaffed_agents,
- greatest(0,required_agents-greatest(0,rostered_agents-ceil(rostered_agents*.10)))*24.0 AS estimated_hourly_gap_cost,
- region||'-'||language AS skill_pool
-FROM s;
+ WHEN extract(hour FROM hour_utc)>=15 AND extract(hour FROM hour_utc)<23 THEN 2 ELSE 1 END AS rostered_agents
+ FROM hourly_commerce),
+allocated AS (SELECT d.*,p.shift_pattern,p.rostered_agents,p.rostered_agents*.90 AS break_adjusted_agents,
+ p.region||'-'||p.language AS skill_pool,
+ CASE WHEN d.pool_workload_minutes>0 THEN p.rostered_agents*.90*d.handling_minutes/d.pool_workload_minutes ELSE 0 END AS allocated_scheduled_agents
+ FROM demand d JOIN pool_schedule p USING(hour_utc,region,language))
+SELECT *,ceil(required_agent_equiv) AS required_agents,
+ greatest(0,required_agent_equiv-allocated_scheduled_agents) AS agent_gap,
+ greatest(0,allocated_scheduled_agents-required_agent_equiv) AS overstaffed_agents,
+ greatest(0,required_agent_equiv-allocated_scheduled_agents)*24.0 AS estimated_hourly_gap_cost
+FROM allocated;
 CREATE OR REPLACE VIEW service_commercial_risk AS
 WITH b AS (SELECT *,CASE WHEN agent_gap>0 THEN 'coverage_gap' WHEN p90_first_response_minutes>10 THEN 'response_time'
  WHEN conversion_rate<.08 THEN 'conversion' WHEN avg_concurrency>=3.5 THEN 'queue_saturation' WHEN resolution_rate<.82 THEN 'resolution' END AS risk_type,
