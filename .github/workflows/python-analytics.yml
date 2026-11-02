@@ -6,11 +6,56 @@ on:
   pull_request:
     paths: ['python/**', '.github/workflows/python-analytics.yml']
   workflow_dispatch:
+    inputs:
+      profile:
+        description: Analytics refresh size
+        type: choice
+        default: smoke
+        options: [smoke, full]
+      days:
+        description: Override history length in days (blank uses the profile default)
+        type: string
+        required: false
+      chats_per_day:
+        description: Override daily chat volume (blank uses the profile default)
+        type: string
+        required: false
+      retention_days:
+        description: Artifact retention in days
+        type: string
+        default: '14'
+        required: false
   schedule:
+    # Daily synthetic refresh. Edit this cron entry to change the frequency; GitHub only
+    # evaluates schedules that exist on the default branch.
     - cron: '17 2 * * *'
 permissions:
   contents: read
+concurrency:
+  group: analytics-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
+  secrets_audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      ingestion: ${{ steps.check.outputs.ingestion }}
+    steps:
+      - name: Report whether provider credentials are configured
+        id: check
+        env:
+          SUPPORT_API_TOKEN: ${{ secrets.SUPPORT_API_TOKEN }}
+          SUPPORT_API_URL: ${{ vars.SUPPORT_API_URL }}
+        shell: bash
+        run: |
+          if [ -n "$SUPPORT_API_TOKEN" ] && [ -n "$SUPPORT_API_URL" ]; then
+            echo "ingestion=true" >> "$GITHUB_OUTPUT"
+            echo "Provider ingestion is configured; no credential value was printed."
+          else
+            echo "ingestion=false" >> "$GITHUB_OUTPUT"
+            echo "Provider ingestion is not configured; synthetic checks continue without credentials."
+          fi
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -30,6 +75,9 @@ jobs:
           cache-dependency-path: python/requirements.txt
       - run: python -m pip install -r requirements.txt
       - run: python -m pip check
+      - name: Install optional solver dependencies
+        continue-on-error: true
+        run: python -m pip install -r requirements-optimizer.txt
       - name: Unit, mocked API and real DuckDB SQL tests
         run: python -m pytest tests -q --junitxml=outputs/test-results.xml
       - name: Archive test results
@@ -39,9 +87,25 @@ jobs:
           name: python-test-results-${{ matrix.python-version }}
           path: python/outputs/test-results.xml
           if-no-files-found: error
-          retention-days: 14
-  analytics:
-    needs: test
+          retention-days: ${{ inputs.retention_days || '14' }}
+
+  dependencies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: python/requirements.txt
+      - run: python -m pip install --upgrade pip pip-audit
+      - name: Audit declared dependencies against the OSV database
+        run: python -m pip_audit --progress-spinner off --desc on -r python/requirements.txt
+
+  ingest:
+    needs: [test, secrets_audit]
+    if: needs.secrets_audit.outputs.ingestion == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -55,16 +119,114 @@ jobs:
           cache: pip
           cache-dependency-path: python/requirements.txt
       - run: python -m pip install -r requirements.txt
-      - name: Fast end-to-end smoke test on code changes
-        if: github.event_name != 'schedule'
-        run: python src/commerce_analytics.py --days 14 --chats-per-day 30 --events config/events.example.csv
-      - name: Full daily synthetic analytics refresh
-        if: github.event_name == 'schedule'
-        run: python src/commerce_analytics.py --days 210 --chats-per-day 190 --events config/events.example.csv
+      - name: Incremental provider extraction
+        shell: bash
+        env:
+          SUPPORT_API_URL: ${{ vars.SUPPORT_API_URL }}
+          SUPPORT_API_TOKEN: ${{ secrets.SUPPORT_API_TOKEN }}
+          SUPPORT_PROVIDER: ${{ vars.SUPPORT_PROVIDER }}
+          SUPPORT_MAPPING: ${{ vars.SUPPORT_MAPPING }}
+        run: |
+          set -euo pipefail
+          mkdir -p outputs/data/raw
+          python src/support_api_ingest.py \
+            --provider "${SUPPORT_PROVIDER:-generic}" \
+            --base-url "$SUPPORT_API_URL" \
+            --mapping "${SUPPORT_MAPPING:-config/api_field_mapping.example.json}" \
+            --output outputs/data/raw/provider_conversations.csv \
+            --state outputs/ingestion_state.json 2>&1 | tee outputs/ingestion.log
+      - name: Alert on failed ingestion
+        if: failure()
+        shell: bash
+        run: |
+          {
+            echo "## Incremental ingestion failed"
+            echo ""
+            echo "Run \`${GITHUB_RUN_ID}\` on \`${GITHUB_REF_NAME}\`. The previous valid extract and watermark were left untouched."
+            echo "See \`ingestion.log\` and \`ingestion_last_error.json\` in this run's artifacts."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Archive ingestion evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ingestion-state
+          path: |
+            python/outputs/ingestion.log
+            python/outputs/ingestion_state.json
+            python/outputs/ingestion_last_error.json
+          if-no-files-found: ignore
+          retention-days: ${{ inputs.retention_days || '30' }}
+
+  analytics:
+    needs: [test, secrets_audit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: python/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - name: Resolve the refresh profile
+        id: profile
+        shell: bash
+        env:
+          INPUT_PROFILE: ${{ inputs.profile }}
+          INPUT_DAYS: ${{ inputs.days }}
+          INPUT_CHATS: ${{ inputs.chats_per_day }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          profile="$INPUT_PROFILE"
+          [ "$EVENT_NAME" = "schedule" ] && profile=full
+          [ -z "$profile" ] && profile=smoke
+          if [ "$profile" = "full" ]; then days=210; chats=190; else days=14; chats=30; fi
+          [ -n "$INPUT_DAYS" ] && days="$INPUT_DAYS"
+          [ -n "$INPUT_CHATS" ] && chats="$INPUT_CHATS"
+          if ! [[ "$days" =~ ^[1-9][0-9]*$ && "$chats" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::days and chats_per_day must be positive integers"
+            exit 1
+          fi
+          {
+            echo "profile=$profile"
+            echo "days=$days"
+            echo "chats=$chats"
+          } >> "$GITHUB_OUTPUT"
+          echo "Refresh profile: $profile (days=$days, chats_per_day=$chats)"
+      - name: Refresh the synthetic analytics database
+        shell: bash
+        env:
+          DAYS: ${{ steps.profile.outputs.days }}
+          CHATS: ${{ steps.profile.outputs.chats }}
+        run: |
+          set -euo pipefail
+          mkdir -p outputs
+          python src/commerce_analytics.py --days "$DAYS" --chats-per-day "$CHATS" \
+            --events config/events.example.csv 2>&1 | tee outputs/pipeline.log
+      - name: Monitor reconciliation quality and refresh state
+        shell: bash
+        env:
+          REFRESH_PROFILE: ${{ steps.profile.outputs.profile }}
+        run: python src/refresh_monitor.py --profile "$REFRESH_PROFILE"
+      - name: Alert on a failed refresh
+        if: failure()
+        shell: bash
+        run: |
+          {
+            echo "## Scheduled analytics refresh failed"
+            echo ""
+            echo "Workflow \`${GITHUB_WORKFLOW}\` run \`${GITHUB_RUN_ID}\` on \`${GITHUB_REF_NAME}\`."
+            echo "Previously validated outputs stay published until a passing run replaces them; see \`pipeline.log\`."
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Archive validated analytics outputs
         uses: actions/upload-artifact@v4
         with:
           name: commerce-analytics-outputs
           path: python/outputs/
           if-no-files-found: error
-          retention-days: 14
+          retention-days: ${{ inputs.retention_days || '14' }}
