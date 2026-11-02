@@ -18,9 +18,12 @@ def test_data_contract_and_local_time():
     expected=pd.Timestamp(row.arrived_at_utc).tz_convert(row.local_timezone).hour
     assert row.local_hour==expected
 
-def test_missing_language_rejected():
-    df=generate_data(days=2,chats_per_day=10); df.loc[0,'language']=None
-    with pytest.raises(ValueError,match='required_dimensions|region_language'): validate_chats(df)
+@pytest.mark.parametrize('column,diagnostic', [('region', 'missing_region'), ('language', 'missing_language')])
+def test_missing_region_or_language_rejected(column, diagnostic):
+    df=generate_data(days=2,chats_per_day=10)
+    df.loc[0,column]=None
+    with pytest.raises(ValueError,match=diagnostic):
+        validate_chats(df)
 
 def test_invalid_region_language_pair_rejected():
     df=generate_data(days=2,chats_per_day=10); df.loc[0,'region']='APAC'; df.loc[0,'language']='fr'

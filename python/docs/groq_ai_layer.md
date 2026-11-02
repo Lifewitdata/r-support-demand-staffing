@@ -1,6 +1,6 @@
 # Groq AI layer
 
-The optional Groq integration adds a natural-language explanation layer over approved DuckDB analytics and an optional conversation-text analysis workflow.
+The optional Groq integration adds a natural-language explanation layer over approved DuckDB analytics and an optional conversation-text analysis workflow. See [responsible_ai.md](responsible_ai.md) for the documented boundary between model-generated output, deterministic code validation and verified evidence.
 
 ## Setup
 

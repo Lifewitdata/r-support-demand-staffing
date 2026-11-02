@@ -105,7 +105,8 @@ jobs:
 
   ingest:
     needs: [test, secrets_audit]
-    if: needs.secrets_audit.outputs.ingestion == 'true'
+    # Provider ingestion is an explicit manual validation step, never a scheduled live-data pull.
+    if: github.event_name == 'workflow_dispatch' && needs.secrets_audit.outputs.ingestion == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -119,43 +120,43 @@ jobs:
           cache: pip
           cache-dependency-path: python/requirements.txt
       - run: python -m pip install -r requirements.txt
-      - name: Incremental provider extraction
+      - name: Import and validate an approved provider extract
         shell: bash
         env:
           SUPPORT_API_URL: ${{ vars.SUPPORT_API_URL }}
           SUPPORT_API_TOKEN: ${{ secrets.SUPPORT_API_TOKEN }}
-          SUPPORT_PROVIDER: ${{ vars.SUPPORT_PROVIDER }}
           SUPPORT_MAPPING: ${{ vars.SUPPORT_MAPPING }}
+          SUPPORT_RECORDS_PATH: ${{ vars.SUPPORT_RECORDS_PATH }}
+          SUPPORT_NEXT_PATH: ${{ vars.SUPPORT_NEXT_PATH }}
         run: |
           set -euo pipefail
-          mkdir -p outputs/data/raw
-          python src/support_api_ingest.py \
-            --provider "${SUPPORT_PROVIDER:-generic}" \
-            --base-url "$SUPPORT_API_URL" \
+          mkdir -p outputs
+          python src/api_ingestion.py \
             --mapping "${SUPPORT_MAPPING:-config/api_field_mapping.example.json}" \
-            --output outputs/data/raw/provider_conversations.csv \
-            --state outputs/ingestion_state.json 2>&1 | tee outputs/ingestion.log
-      - name: Alert on failed ingestion
+            --records-path "${SUPPORT_RECORDS_PATH:-data}" \
+            --next-path "${SUPPORT_NEXT_PATH:-next}" \
+            --output outputs/provider_conversations.csv
+      - name: Record validation result without retaining source records
+        shell: bash
+        run: |
+          rows=$(python -c "import pandas as pd; print(len(pd.read_csv('outputs/provider_conversations.csv')))")
+          {
+            echo "## Provider import contract passed"
+            echo
+            echo "Mapped and validated ${rows} rows against the canonical schema, including required region/language, UTC timestamp, timezone and metric checks."
+            echo
+            echo "The source extract is not uploaded as a workflow artifact. Run the documented local import command to retain the approved extract and pass it to the analytics pipeline."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Alert on failed provider validation
         if: failure()
         shell: bash
         run: |
           {
-            echo "## Incremental ingestion failed"
-            echo ""
-            echo "Run \`${GITHUB_RUN_ID}\` on \`${GITHUB_REF_NAME}\`. The previous valid extract and watermark were left untouched."
-            echo "See \`ingestion.log\` and \`ingestion_last_error.json\` in this run's artifacts."
+            echo "## Provider import validation failed"
+            echo
+            echo "No validated extract was promoted. Check the failed step and confirm the endpoint, field mapping and credentials."
+            echo "Source records are not archived by this workflow."
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Archive ingestion evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ingestion-state
-          path: |
-            python/outputs/ingestion.log
-            python/outputs/ingestion_state.json
-            python/outputs/ingestion_last_error.json
-          if-no-files-found: ignore
-          retention-days: ${{ inputs.retention_days || '30' }}
 
   analytics:
     needs: [test, secrets_audit]

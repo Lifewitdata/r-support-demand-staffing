@@ -23,7 +23,7 @@ Evaluation uses a fixed chronological origin and recursive prediction, retaining
 Volume and handling-time effects are arithmetic workload decompositions, not causal estimates. Review reason mix, escalations, product releases, routing and QA evidence before assigning corrective action.
 
 ## Privacy and responsible AI
-Use synthetic or approved de-identified data. Do not ingest message text, names, emails, payment details or sensitive attributes. Forecasts and risk flags support human decisions; do not use them for automated employee scoring, discipline or customer eligibility. Provide human review and appeal routes in production.
+See [Responsible AI: scope, code validation and evidence boundaries](responsible_ai.md) for the exact role of the optional Groq model, deterministic code checks, privacy limitations and human-review requirements. Use synthetic or approved de-identified data. Do not use forecasts, risk flags or model classifications for automated employee scoring, discipline or customer eligibility.
 
 ## Refresh
 The workflow performs scheduled synthetic refreshes and archives artifacts; it is not a live provider integration or a deployment. The generic REST adapter requires confirmed provider mappings and credentials. Source/hourly/daily/weekly/monthly/team reconciliation covers eight additive metrics and blocks mismatched exports. Database schema changes are transactional; multi-file publishing is not atomic. For production, use --output-dir staging and implement atomic delivery, stale-data monitoring and approved access controls. Original R outputs are independent.

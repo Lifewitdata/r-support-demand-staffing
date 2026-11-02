@@ -87,6 +87,10 @@ def validate_chats(df):
 
     blank_ids = df.chat_id.isna() | df.chat_id.astype(str).str.strip().eq('')
     record('unique_chat_id', blank_ids.sum() + df.chat_id.duplicated().sum(), 'chat_id must be unique and non-blank')
+    blank_region = df.region.isna() | df.region.astype(str).str.strip().eq('')
+    blank_language = df.language.isna() | df.language.astype(str).str.strip().eq('')
+    record('missing_region', blank_region.sum(), 'region must be populated')
+    record('missing_language', blank_language.sum(), 'language must be populated')
     dims = ['region', 'language', 'channel', 'market', 'team', 'local_timezone', 'event_type', 'contact_reason']
     blank_dims = df[dims].isna() | df[dims].astype(str).apply(lambda col: col.str.strip().eq(''))
     record('required_dimensions', blank_dims.any(axis=1).sum(), 'Required dimensions must be populated')
