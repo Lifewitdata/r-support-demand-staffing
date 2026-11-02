@@ -48,13 +48,21 @@ FROM w WHERE (prior_volume_sd>0 AND abs(chats-prior_volume_avg)>3*prior_volume_s
  OR (prior_aht_sd>0 AND avg_handling_minutes>prior_aht_avg+3*prior_aht_sd);
 CREATE OR REPLACE VIEW root_cause_decomposition AS
 WITH d AS (SELECT CAST(arrived_at_utc AS DATE) AS day,region,language,channel,count(*) AS chats,avg(handling_minutes) AS aht,
- sum(handling_minutes) AS workload_minutes,avg(escalated::INT) AS escalation_rate,avg(resolved::INT) AS resolution_rate,avg(concurrency) AS avg_concurrency
+ sum(handling_minutes) AS workload_minutes,avg(escalated::INT) AS escalation_rate,avg(resolved::INT) AS resolution_rate,
+ avg(concurrency) AS avg_concurrency,mode(contact_reason) AS top_contact_reason
  FROM conversations GROUP BY 1,2,3,4),
-p AS (SELECT *,lag(chats) OVER(PARTITION BY region,language,channel ORDER BY day) AS prior_chats,lag(aht) OVER(PARTITION BY region,language,channel ORDER BY day) AS prior_aht FROM d)
-SELECT day,region,language,channel,chats,aht,workload_minutes,escalation_rate,resolution_rate,avg_concurrency,
- chats-coalesce(prior_chats,chats) AS volume_change,round((aht-coalesce(prior_aht,aht))*chats,2) AS handling_time_effect_minutes,
- round((chats-coalesce(prior_chats,chats))*coalesce(prior_aht,aht),2) AS volume_effect_minutes,
- 'Associational decomposition; not causal attribution' AS interpretation_note FROM p;
+capacity AS (SELECT CAST(hour_utc AS DATE) AS day,region,language,channel,sum(agent_gap) AS agent_gap_hours
+ FROM staffing_coverage GROUP BY 1,2,3,4),
+p AS (SELECT d.*,lag(chats) OVER(PARTITION BY region,language,channel ORDER BY day) AS prior_chats,
+ lag(aht) OVER(PARTITION BY region,language,channel ORDER BY day) AS prior_aht
+ FROM d)
+SELECT p.day,p.region,p.language,p.channel,p.chats,p.aht,p.workload_minutes,p.escalation_rate,p.resolution_rate,
+ p.avg_concurrency,p.top_contact_reason,coalesce(c.agent_gap_hours,0) AS agent_gap_hours,
+ p.chats-coalesce(p.prior_chats,p.chats) AS volume_change,
+ round((p.aht-coalesce(p.prior_aht,p.aht))*p.chats,2) AS handling_time_effect_minutes,
+ round((p.chats-coalesce(p.prior_chats,p.chats))*coalesce(p.prior_aht,p.aht),2) AS volume_effect_minutes,
+ 'Associational decomposition; not causal attribution' AS interpretation_note
+FROM p LEFT JOIN capacity c USING(day,region,language,channel);
 CREATE OR REPLACE VIEW daily_kpis AS SELECT CAST(arrived_at_utc AS DATE) AS report_date,region,language,channel,count(*) AS chats,
  avg(first_response_minutes) AS avg_first_response_minutes,quantile_cont(first_response_minutes,.90) AS p90_first_response_minutes,
  avg(handling_minutes) AS avg_handling_minutes,avg(resolved::INT) AS resolution_rate,avg(csat) AS avg_csat,avg(converted::INT) AS conversion_rate,
