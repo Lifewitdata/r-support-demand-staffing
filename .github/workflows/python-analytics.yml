@@ -23,4 +23,10 @@ jobs:
           cache-dependency-path: python/requirements.txt
       - run: pip install -r requirements.txt
       - run: pytest -q
-      - run: python src/commerce_analytics.py --days 14 --chats-per-day 30
+      - run: python src/commerce_analytics.py --days 210 --chats-per-day 190 --events config/events.example.csv
+      - name: Archive reproducible analytics outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: commerce-analytics-outputs
+          path: python/outputs/
+          retention-days: 14
