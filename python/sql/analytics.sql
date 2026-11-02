@@ -1,11 +1,41 @@
+-- Complete hourly calendar per observed region/language/channel segment.
+-- Empty hours remain visible with zero chats so rolling windows mean real hours.
 CREATE OR REPLACE VIEW hourly_commerce AS
-SELECT date_trunc('hour',arrived_at_utc) AS hour_utc,region,language,channel,count(*) AS chats,
- avg(first_response_minutes) AS avg_first_response_minutes,quantile_cont(first_response_minutes,.90) AS p90_first_response_minutes,
- avg(handling_minutes) AS avg_handling_minutes,sum(handling_minutes) AS handling_minutes,avg(resolved::INT) AS resolution_rate,
- avg(csat) AS avg_csat,avg(converted::INT) AS conversion_rate,sum(revenue) AS converted_revenue,avg(concurrency) AS avg_concurrency,
- sum(escalated) AS escalations,count(*) FILTER(WHERE event_type<>'none') AS event_chats,
- avg((event_type<>'none')::INT) AS event_rate,avg((event_type='incident')::INT) AS incident_rate,avg((event_type='campaign')::INT) AS campaign_rate,avg((event_type='holiday')::INT) AS holiday_rate,avg((event_type='product_launch')::INT) AS launch_rate
-FROM conversations GROUP BY 1,2,3,4;
+WITH segments AS (
+ SELECT DISTINCT region,language,channel FROM conversations
+), bounds AS (
+ SELECT date_trunc('hour',min(arrived_at_utc)) AS min_hour,
+        date_trunc('hour',max(arrived_at_utc)) AS max_hour FROM conversations
+), hours AS (
+ SELECT unnest(generate_series(min_hour,max_hour,INTERVAL 1 HOUR)) AS hour_utc FROM bounds
+), spine AS (
+ SELECT h.hour_utc,s.region,s.language,s.channel FROM hours h CROSS JOIN segments s
+), agg AS (
+ SELECT date_trunc('hour',arrived_at_utc) AS hour_utc,region,language,channel,count(*) AS chats,
+  avg(first_response_minutes) AS avg_first_response_minutes,
+  quantile_cont(first_response_minutes,.90) AS p90_first_response_minutes,
+  avg(handling_minutes) AS avg_handling_minutes,sum(handling_minutes) AS handling_minutes,
+  avg(resolved::INT) AS resolution_rate,avg(csat) AS avg_csat,
+  avg(converted::INT) AS conversion_rate,sum(revenue) AS converted_revenue,
+  avg(concurrency) AS avg_concurrency,sum(escalated) AS escalations,
+  count(*) FILTER(WHERE event_type<>'none') AS event_chats,
+  avg((event_type<>'none')::INT) AS event_rate,
+  avg((event_type='incident')::INT) AS incident_rate,
+  avg((event_type='campaign')::INT) AS campaign_rate,
+  avg((event_type='holiday')::INT) AS holiday_rate,
+  avg((event_type='product_launch')::INT) AS launch_rate,
+  mode(local_hour) AS local_hour
+ FROM conversations GROUP BY 1,2,3,4
+)
+SELECT s.hour_utc,s.region,s.language,s.channel,coalesce(a.chats,0) AS chats,
+ a.avg_first_response_minutes,a.p90_first_response_minutes,a.avg_handling_minutes,
+ coalesce(a.handling_minutes,0) AS handling_minutes,a.resolution_rate,a.avg_csat,
+ a.conversion_rate,coalesce(a.converted_revenue,0) AS converted_revenue,a.avg_concurrency,
+ coalesce(a.escalations,0) AS escalations,coalesce(a.event_chats,0) AS event_chats,
+ coalesce(a.event_rate,0) AS event_rate,coalesce(a.incident_rate,0) AS incident_rate,
+ coalesce(a.campaign_rate,0) AS campaign_rate,coalesce(a.holiday_rate,0) AS holiday_rate,
+ coalesce(a.launch_rate,0) AS launch_rate,a.local_hour
+FROM spine s LEFT JOIN agg a USING(hour_utc,region,language,channel);
 -- Illustrative assumptions: 85% occupancy, 25% shrinkage, $24 loaded agent-hour.
 CREATE OR REPLACE VIEW staffing_coverage AS
 WITH demand AS (SELECT *,chats*avg_handling_minutes/(60.0*.85*.75) AS required_agent_equiv,
