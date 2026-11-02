@@ -14,7 +14,7 @@ The conversations table contains one row per chat_id. UTC is the canonical event
 - Required agents: ceiling(workload minutes / (60 x occupancy x productive availability)).
 
 ## Assumptions
-Starter assumptions: 85% occupancy, 25% shrinkage, $24 loaded cost per agent-hour. Starter flags: p90 response >10 minutes, conversion <8%, resolution <82%, concurrency >=3.5. These are configurable examples, not client SLAs or observed costs. The coverage curve is not an optimized roster: no employee-level shift, break, leave, skill certification or labour rules are modeled.
+Starter assumptions: 85% occupancy, 25% shrinkage, $24 loaded cost per agent-hour. Starter flags: p90 response >10 minutes, conversion <8%, resolution <82%, concurrency >=3.5. These are configurable examples, not client SLAs or observed costs. The schedule applies illustrative day (07-15), evening (15-23) and night (23-07) patterns to a shared region-language pool. A 10% break allowance reduces productive capacity; pool capacity is allocated across channels in proportion to handling workload to prevent double counting. It is not an optimized employee roster: exact break placement, leave, skill certification and labour rules are not modeled.
 
 ## Forecast governance
 Chronological holdout avoids random temporal leakage. Segment-level models are selected by available history. Review segment volume and errors before using forecasts. Campaign, holiday, launch and incident labels are generated synthetic regressors. Human review is required for anomalies and drift.
