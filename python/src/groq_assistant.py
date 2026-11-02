@@ -82,5 +82,5 @@ def answer_analytics_question(question: str, db_path: str | Path = DB_PATH) -> d
     return {"intent": intent, "facts": rows, "answer": groq_chat(messages)}
 
 def redact_direct_identifiers(text: str) -> str:
-    text = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "[EMAIL]", str(text))
-    return re.sub(r"(?<!\\w)(?:\\+?\\d[\\d .()/-]{7,}\\d)(?!\\w)", "[PHONE]", text)
+    text = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}", "[EMAIL]", str(text))
+    return re.sub(r"[0-9][0-9 .()+/-]{7,}[0-9]", "[PHONE]", text)
