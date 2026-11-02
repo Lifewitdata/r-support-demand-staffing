@@ -23,7 +23,12 @@ jobs:
           cache-dependency-path: python/requirements.txt
       - run: pip install -r requirements.txt
       - run: pytest -q
-      - run: python src/commerce_analytics.py --days 210 --chats-per-day 190 --events config/events.example.csv
+      - name: Fast end-to-end smoke test on code changes
+        if: github.event_name != 'schedule'
+        run: python src/commerce_analytics.py --days 14 --chats-per-day 30 --events config/events.example.csv
+      - name: Full daily analytics refresh
+        if: github.event_name == 'schedule'
+        run: python src/commerce_analytics.py --days 210 --chats-per-day 190 --events config/events.example.csv
       - name: Archive reproducible analytics outputs
         uses: actions/upload-artifact@v4
         with:
