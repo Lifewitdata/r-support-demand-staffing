@@ -19,19 +19,78 @@ def generate_data(seed=19062026, days=210, chats_per_day=190):
     csat=np.clip(np.rint(rng.normal(np.where(resolved==1,4.35-.012*response,2.8),.7)),1,5)
     converted=rng.binomial(1,np.clip(.12+.07*(team=='Retention')-.002*response+.0005*(csat-3),.01,.32)); revenue=np.where(converted,rng.lognormal(np.log(68),.55),0)
     tz=np.select([region=='AMER',region=='EMEA'],['America/New_York','Europe/London'],default='Asia/Kolkata')
-    return pd.DataFrame({'chat_id':[f'CHAT-{i:08d}' for i in range(1,n+1)],'arrived_at_utc':ts,'region':region,'language':language,'channel':channel,'market':market,'team':team,'local_timezone':tz,'local_hour':hour,'day_of_week':dow,'event_type':event,'concurrency':rng.integers(1,5,n),'first_response_minutes':np.round(response,2),'handling_minutes':np.round(handle,2),'resolved':resolved,'csat':csat,'converted':converted,'revenue':np.round(revenue,2),'contact_reason':rng.choice(['billing','account_access','product_help','delivery','cancellation'],n),'escalated':rng.binomial(1,np.clip(.07+.002*handle+.001*response,.02,.35))})
+    local_hour=np.empty(n,dtype=int)
+    for zone in np.unique(tz):
+        mask=tz==zone; local_hour[mask]=pd.DatetimeIndex(ts[mask]).tz_convert(zone).hour
+    return pd.DataFrame({'chat_id':[f'CHAT-{i:08d}' for i in range(1,n+1)],'arrived_at_utc':ts,'region':region,'language':language,'channel':channel,'market':market,'team':team,'local_timezone':tz,'local_hour':local_hour,'day_of_week':dow,'event_type':event,'concurrency':rng.integers(1,5,n),'first_response_minutes':np.round(response,2),'handling_minutes':np.round(handle,2),'resolved':resolved,'csat':csat,'converted':converted,'revenue':np.round(revenue,2),'contact_reason':rng.choice(['billing','account_access','product_help','delivery','cancellation'],n),'escalated':rng.binomial(1,np.clip(.07+.002*handle+.001*response,.02,.35))})
+def _with_local_hour(df):
+    out=df.copy()
+    out['arrived_at_utc']=pd.to_datetime(out['arrived_at_utc'],utc=True,errors='coerce')
+    local_hour=np.full(len(out),-1,dtype=int)
+    for zone in out['local_timezone'].dropna().unique():
+        mask=out['local_timezone'].eq(zone).to_numpy()
+        try:
+            local_hour[mask]=pd.DatetimeIndex(out.loc[mask,'arrived_at_utc']).tz_convert(zone).hour
+        except Exception as exc:
+            raise ValueError(f'Invalid IANA timezone {zone!r}: {exc}') from exc
+    out['local_hour']=local_hour
+    return out
+
+def load_input_csv(path):
+    """Load an approved chat-level CSV and normalize timestamps/local hours."""
+    df=pd.read_csv(path)
+    if 'arrived_at_utc' not in df:
+        raise ValueError('Input CSV must include arrived_at_utc')
+    if 'local_timezone' not in df:
+        raise ValueError('Input CSV must include local_timezone')
+    return _with_local_hour(df)
+
 def validate_chats(df):
-    required=['chat_id','arrived_at_utc','region','language','channel','market','team','local_timezone','first_response_minutes','handling_minutes','resolved','csat','converted','revenue']
+    required=['chat_id','arrived_at_utc','region','language','channel','market','team','local_timezone',
+              'event_type','concurrency','first_response_minutes','handling_minutes','resolved','csat',
+              'converted','revenue','contact_reason','escalated']
     missing=[c for c in required if c not in df]
-    if missing: raise ValueError('Missing columns: '+str(missing))
-    if df.chat_id.isna().any() or df.chat_id.duplicated().any(): raise ValueError('chat_id must be unique and non-null')
-    if df[['region','language','channel','market','team','local_timezone']].isna().any().any(): raise ValueError('Missing operational dimensions')
-    if df[['arrived_at_utc','first_response_minutes','handling_minutes','resolved','converted','revenue']].isna().any().any(): raise ValueError('Missing required metric values')
-    if not df.resolved.isin([0,1]).all() or not df.converted.isin([0,1]).all(): raise ValueError('Resolution and conversion must be binary')
-    if not set(df.region).issubset(REGIONS): raise ValueError('Unknown region')
-    if (df[['first_response_minutes','handling_minutes','revenue']]<0).any().any(): raise ValueError('Negative metric')
-    if not df.csat.dropna().between(1,5).all(): raise ValueError('CSAT outside 1..5')
-    return pd.DataFrame([{'check':x,'status':'PASS','failed_rows':0} for x in ['unique_chat_id','required_dimensions','region_language','nonnegative_metrics','csat_range']])
+    if missing:
+        raise ValueError('Missing columns: '+str(missing))
+    checks=[]
+    def record(name,failed,detail):
+        checks.append({'check':name,'status':'PASS' if failed==0 else 'FAIL',
+                       'failed_rows':int(failed),'details':detail})
+    record('unique_chat_id',df.chat_id.isna().sum()+df.chat_id.duplicated().sum(),'chat_id must be unique and non-null')
+    dims=['region','language','channel','market','team','local_timezone','event_type','contact_reason']
+    record('required_dimensions',df[dims].isna().any(axis=1).sum(),'Required dimensions must be populated')
+    valid_language=df.apply(lambda r: r['language'] in REGIONS.get(r['region'],[]),axis=1)
+    record('region_language',(~valid_language).sum(),'Language must be supported by the selected region')
+    timestamps=pd.to_datetime(df.arrived_at_utc,utc=True,errors='coerce')
+    record('valid_utc_timestamp',timestamps.isna().sum(),'arrived_at_utc must be parseable as UTC')
+    numeric=['concurrency','first_response_minutes','handling_minutes','resolved','csat','converted','revenue','escalated']
+    numeric_values=df[numeric].apply(pd.to_numeric,errors='coerce')
+    record('numeric_metrics',numeric_values.isna().sum().sum(),'Operational and commercial measures must be numeric')
+    finite=np.isfinite(numeric_values.fillna(0).to_numpy(dtype=float)).all(axis=1)
+    record('finite_metrics',(~finite).sum(),'Metrics must be finite numbers')
+    nonnegative=['concurrency','first_response_minutes','handling_minutes','revenue']
+    record('nonnegative_metrics',(numeric_values[nonnegative]<0).any(axis=1).sum(),'Durations, concurrency and revenue cannot be negative')
+    record('binary_outcomes',(~numeric_values[['resolved','converted','escalated']].isin([0,1])).any(axis=1).sum(),'resolved, converted and escalated must be 0 or 1')
+    csat_bad=numeric_values.csat.notna() & ~numeric_values.csat.between(1,5)
+    record('csat_range',csat_bad.sum(),'CSAT must be null or between 1 and 5')
+    allowed_events={'none','campaign','holiday','product_launch','incident'}
+    record('event_type',(~df.event_type.isin(allowed_events)).sum(),'event_type must use the documented categories')
+    record('known_region',(~df.region.isin(REGIONS)).sum(),'Unknown region code')
+    invalid_timezone=0
+    for zone in df.local_timezone.dropna().unique():
+        try:
+            from zoneinfo import ZoneInfo
+            ZoneInfo(str(zone))
+        except Exception:
+            invalid_timezone+=int(df.local_timezone.eq(zone).sum())
+    record('valid_timezone',invalid_timezone,'local_timezone must be a valid IANA timezone')
+    failed=sum(x['failed_rows'] for x in checks if x['status']=='FAIL')
+    report=pd.DataFrame(checks)
+    if failed:
+        failed_names=', '.join(x['check'] for x in checks if x['status']=='FAIL')
+        raise ValueError(f'Chat data validation failed: {failed_names}')
+    return report
+
 def build_forecast(hourly):
     preds=[]; scores=[]
     for keys,g in hourly.groupby(['region','language','channel']):
@@ -47,8 +106,10 @@ def build_forecast(hourly):
         y=te.chats.to_numpy(); scores.append({'region':keys[0],'language':keys[1],'channel':keys[2],'model':name,'holdout_hours':len(te),'mae':mean_absolute_error(y,p),'rmse':mean_squared_error(y,p)**.5,'wape':np.abs(y-p).sum()/max(y.sum(),1)})
         preds.append(pd.DataFrame({'hour_utc':te.hour_utc,'region':keys[0],'language':keys[1],'channel':keys[2],'actual_chats':y,'predicted_chats':np.round(p,2),'model':name}))
     return (pd.concat(preds,ignore_index=True) if preds else pd.DataFrame(),pd.DataFrame(scores))
-def run_pipeline(days=210,chats_per_day=190):
-    RAW.mkdir(parents=True,exist_ok=True); OUT.mkdir(parents=True,exist_ok=True); df=generate_data(days=days,chats_per_day=chats_per_day); dq=validate_chats(df)
+def run_pipeline(days=210,chats_per_day=190,input_path=None):
+    RAW.mkdir(parents=True,exist_ok=True); OUT.mkdir(parents=True,exist_ok=True)
+    df=load_input_csv(input_path) if input_path else generate_data(days=days,chats_per_day=chats_per_day)
+    df=_with_local_hour(df); dq=validate_chats(df)
     df.to_csv(RAW/'conversations.csv',index=False); dq.to_csv(OUT/'data_quality.csv',index=False)
     db=OUT/'commerce_analytics.duckdb'; con=duckdb.connect(str(db)); con.register('incoming',df); con.execute('CREATE OR REPLACE TABLE conversations AS SELECT * FROM incoming'); con.execute((ROOT/'sql'/'analytics.sql').read_text())
     names=['hourly_commerce','staffing_coverage','service_commercial_risk','operational_anomalies','root_cause_decomposition','daily_kpis','weekly_kpis','monthly_kpis']
@@ -67,6 +128,6 @@ def run_pipeline(days=210,chats_per_day=190):
         m=monthly.sort_values('month_start').iloc[-1]
         summary=['# Monthly executive summary','',f"Month: {m['month_start']}",f"Chats: {int(m['chats']):,}",f"Resolution: {m['resolution_rate']:.1%}",f"Conversion: {m['conversion_rate']:.1%}",f"CSAT: {m['avg_csat']:.2f}",f"Converted revenue: ${m['converted_revenue']:,.0f}",'','## Decision focus','Review the three largest region-language-channel coverage gaps and assign a named operations owner before changing staffing.','Revenue is attributed converted revenue, not estimated revenue loss.']
         (OUT/'monthly_executive_summary.md').write_text('\\n'.join(summary))
-    con.close(); manifest={'synthetic':True,'rows':len(df),'tables':exports,'database':str(db.relative_to(ROOT))}; (OUT/'run_manifest.json').write_text(json.dumps(manifest,indent=2)); return manifest
+    con.close(); manifest={'synthetic':input_path is None,'source_file':str(input_path) if input_path else None,'rows':len(df),'tables':exports,'database':str(db.relative_to(ROOT))}; (OUT/'run_manifest.json').write_text(json.dumps(manifest,indent=2)); return manifest
 if __name__=='__main__':
-    p=argparse.ArgumentParser(); p.add_argument('--days',type=int,default=210); p.add_argument('--chats-per-day',type=int,default=190); a=p.parse_args(); print(json.dumps(run_pipeline(a.days,a.chats_per_day),indent=2))
+    p=argparse.ArgumentParser(); p.add_argument('--days',type=int,default=210); p.add_argument('--chats-per-day',type=int,default=190); p.add_argument('--input',help='Path to an approved chat-level CSV; if omitted, synthetic data is generated'); a=p.parse_args(); print(json.dumps(run_pipeline(a.days,a.chats_per_day,a.input),indent=2))
