@@ -42,4 +42,4 @@ def test_chronological_holdout_forecast():
     df=pd.DataFrame({'hour_utc':ix,'region':'AMER','language':'en','channel':'live_chat','chats':[20+i%24 for i in range(240)]})
     pred,score=build_forecast(df)
     assert not pred.empty and len(score)==1 and score.iloc[0].mae>=0
-    assert pred.hour_utc.max()<ix.max()
+    assert pred.hour_utc.min()>ix[224] and pred.hour_utc.max()==ix.max()
