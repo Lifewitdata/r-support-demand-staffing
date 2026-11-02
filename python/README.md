@@ -24,14 +24,14 @@ The pipeline generates chat-level records, validates the ingestion contract, loa
 ## Analytical assumptions and limits
 
 - Forecasting uses a Random Forest per region/language/channel where history is sufficient, otherwise seasonal-naive. Holdout metrics are MAE, RMSE and WAPE. This is a baseline, not a guarantee.
-- Staffing uses 85% occupancy and 25% shrinkage. The illustrative schedule is not a labour-law-compliant individual shift optimizer and does not model breaks, leave or certified skills.
+- Staffing uses 85% occupancy and 25% shrinkage. Day/evening/night shift patterns are represented, a 10% break allowance reduces available capacity, and the region-language skill pool is allocated across channels to avoid double-counting the same agents. This is not an employee-level roster optimizer: break timing, leave, certifications and labour rules are not modeled.
 - Risk thresholds are starter assumptions, not contracted SLAs. Alerts are flags, not proof of service failure.
 - Converted revenue is observed synthetic revenue, not estimated lost revenue.
 - Volume/AHT root-cause decomposition is arithmetic and associational, not causal.
 
 ## Tableau handoff
 
-Use outputs/tableau_hourly_commerce.csv, tableau_staffing_coverage.csv, tableau_service_commercial_risk.csv, tableau_root_cause_decomposition.csv and daily/weekly/monthly exports. Filter by region, language, channel and date. Use hour_utc for globally consistent hourly analysis.
+Use outputs/tableau_hourly_commerce.csv, tableau_staffing_coverage.csv, tableau_service_commercial_risk.csv, tableau_operational_anomalies.csv, tableau_root_cause_decomposition.csv and the daily/weekly/monthly KPI exports. Filter by region, language, channel and date. Use hour_utc for globally consistent hourly analysis.
 
 ## Ingestion contract
 
