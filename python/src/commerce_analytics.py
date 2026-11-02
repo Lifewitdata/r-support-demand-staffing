@@ -33,6 +33,8 @@ def validate_chats(df):
 def build_forecast(hourly):
     preds=[]; scores=[]
     for keys,g in hourly.groupby(['region','language','channel']):
+        for col in ['event_rate','campaign_rate','holiday_rate','launch_rate','incident_rate']:
+            if col not in g: g[col]=0.0
         g=g.sort_values('hour_utc').copy(); full=pd.date_range(g.hour_utc.min(),g.hour_utc.max(),freq='h'); g=g.set_index('hour_utc').reindex(full).rename_axis('hour_utc').reset_index(); g['region']=keys[0]; g['language']=keys[1]; g['channel']=keys[2]; g['chats']=g.chats.fillna(0); g['event_rate']=g.event_rate.fillna(0); g['campaign_rate']=g.campaign_rate.fillna(0); g['holiday_rate']=g.holiday_rate.fillna(0); g['launch_rate']=g.launch_rate.fillna(0); g['incident_rate']=g.incident_rate.fillna(0); g['hour']=g.hour_utc.dt.hour; g['dow']=g.hour_utc.dt.dayofweek
         g['lag24']=g.chats.shift(24); g['lag168']=g.chats.shift(168); g['roll24']=g.chats.shift(1).rolling(24,min_periods=6).mean(); g=g.dropna().reset_index(drop=True)
         if len(g)<72: continue
@@ -52,6 +54,17 @@ def run_pipeline(days=210,chats_per_day=190):
     for name in names:
         x=con.execute('SELECT * FROM '+name).df(); x.to_csv(OUT/('tableau_'+name+'.csv'),index=False); exports[name]=len(x)
     hourly=con.execute('SELECT * FROM hourly_commerce').df(); pred,score=build_forecast(hourly); pred.to_csv(OUT/'forecast_holdout.csv',index=False); score.to_csv(OUT/'forecast_scores.csv',index=False)
+    daily=con.execute('SELECT * FROM daily_kpis').df(); weekly=con.execute('SELECT * FROM weekly_kpis').df(); monthly=con.execute('SELECT * FROM monthly_kpis').df(); risks=con.execute('SELECT * FROM service_commercial_risk').df()
+    daily.to_csv(OUT/'daily_tracker.csv',index=False)
+    if not weekly.empty:
+        w=weekly.sort_values('week_start').iloc[-1]
+        brief=['# Weekly operations brief','',f"Week starting: {w['week_start']}",f"Chats: {int(w['chats']):,}",f"Conversion: {w['conversion_rate']:.1%}",f"Mean first response: {w['avg_first_response_minutes']:.1f} min",f"Converted revenue: ${w['converted_revenue']:,.0f}",'','## Priority risk alerts']
+        for _,r in risks.head(5).iterrows(): brief.append(f"- {r['severity']} {r['region']}/{r['language']}/{r['channel']}: {r['risk_type']} — {r['suggested_action']}")
+        (OUT/'weekly_brief.md').write_text('\\n'.join(brief))
+    if not monthly.empty:
+        m=monthly.sort_values('month_start').iloc[-1]
+        summary=['# Monthly executive summary','',f"Month: {m['month_start']}",f"Chats: {int(m['chats']):,}",f"Resolution: {m['resolution_rate']:.1%}",f"Conversion: {m['conversion_rate']:.1%}",f"CSAT: {m['avg_csat']:.2f}",f"Converted revenue: ${m['converted_revenue']:,.0f}",'','## Decision focus','Review the three largest region-language-channel coverage gaps and assign a named operations owner before changing staffing.','Revenue is attributed converted revenue, not estimated revenue loss.']
+        (OUT/'monthly_executive_summary.md').write_text('\\n'.join(summary))
     con.close(); manifest={'synthetic':True,'rows':len(df),'tables':exports,'database':str(db.relative_to(ROOT))}; (OUT/'run_manifest.json').write_text(json.dumps(manifest,indent=2)); return manifest
 if __name__=='__main__':
     p=argparse.ArgumentParser(); p.add_argument('--days',type=int,default=210); p.add_argument('--chats-per-day',type=int,default=190); a=p.parse_args(); print(json.dumps(run_pipeline(a.days,a.chats_per_day),indent=2))
