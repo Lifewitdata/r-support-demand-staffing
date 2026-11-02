@@ -91,6 +91,35 @@ def validate_chats(df):
         raise ValueError(f'Chat data validation failed: {failed_names}')
     return report
 
+def load_event_calendar(path):
+    events=pd.read_csv(path)
+    required=['event_id','region','language','channel','event_type','start_utc','end_utc']
+    missing=set(required)-set(events.columns)
+    if missing: raise ValueError(f'Event calendar missing columns: {sorted(missing)}')
+    events['start_utc']=pd.to_datetime(events.start_utc,utc=True,errors='coerce')
+    events['end_utc']=pd.to_datetime(events.end_utc,utc=True,errors='coerce')
+    if events[['start_utc','end_utc']].isna().any().any(): raise ValueError('Event start/end must be valid UTC timestamps')
+    if (events.end_utc<=events.start_utc).any(): raise ValueError('Event end_utc must be after start_utc')
+    allowed={'campaign','holiday','product_launch','incident'}
+    if not events.event_type.isin(allowed).all(): raise ValueError('Unsupported event_type in event calendar')
+    return events
+
+def apply_event_calendar(hourly, events):
+    out=hourly.copy()
+    for col in ['event_rate','campaign_rate','holiday_rate','launch_rate','incident_rate']:
+        if col not in out: out[col]=0.0
+    if events is None or events.empty: return out
+    out['hour_utc']=pd.to_datetime(out.hour_utc,utc=True)
+    for _,event in events.iterrows():
+        mask=(out.hour_utc>=event.start_utc)&(out.hour_utc<event.end_utc)
+        for dim in ['region','language','channel']:
+            if str(event[dim]) not in ('*','ALL','all'): mask &= out[dim].astype(str).eq(str(event[dim]))
+        if not mask.any(): continue
+        out.loc[mask,'event_rate']=1.0
+        col={'campaign':'campaign_rate','holiday':'holiday_rate','product_launch':'launch_rate','incident':'incident_rate'}[event.event_type]
+        out.loc[mask,col]=1.0
+    return out
+
 def build_forecast(hourly):
     preds=[]; scores=[]
     for keys,g in hourly.groupby(['region','language','channel']):
@@ -106,7 +135,7 @@ def build_forecast(hourly):
         y=te.chats.to_numpy(); scores.append({'region':keys[0],'language':keys[1],'channel':keys[2],'model':name,'holdout_hours':len(te),'mae':mean_absolute_error(y,p),'rmse':mean_squared_error(y,p)**.5,'wape':np.abs(y-p).sum()/max(y.sum(),1)})
         preds.append(pd.DataFrame({'hour_utc':te.hour_utc,'region':keys[0],'language':keys[1],'channel':keys[2],'actual_chats':y,'predicted_chats':np.round(p,2),'model':name}))
     return (pd.concat(preds,ignore_index=True) if preds else pd.DataFrame(),pd.DataFrame(scores))
-def run_pipeline(days=210,chats_per_day=190,input_path=None):
+def run_pipeline(days=210,chats_per_day=190,input_path=None,events_path=None):
     RAW.mkdir(parents=True,exist_ok=True); OUT.mkdir(parents=True,exist_ok=True)
     df=load_input_csv(input_path) if input_path else generate_data(days=days,chats_per_day=chats_per_day)
     df=_with_local_hour(df); dq=validate_chats(df)
@@ -116,7 +145,7 @@ def run_pipeline(days=210,chats_per_day=190,input_path=None):
     exports={}
     for name in names:
         x=con.execute('SELECT * FROM '+name).df(); x.to_csv(OUT/('tableau_'+name+'.csv'),index=False); exports[name]=len(x)
-    hourly=con.execute('SELECT * FROM hourly_commerce').df(); pred,score=build_forecast(hourly); pred.to_csv(OUT/'forecast_holdout.csv',index=False); score.to_csv(OUT/'forecast_scores.csv',index=False)
+    hourly=con.execute('SELECT * FROM hourly_commerce').df(); events=load_event_calendar(events_path) if events_path else None; hourly=apply_event_calendar(hourly,events); pred,score=build_forecast(hourly); pred.to_csv(OUT/'forecast_holdout.csv',index=False); score.to_csv(OUT/'forecast_scores.csv',index=False)
     daily=con.execute('SELECT * FROM daily_kpis').df(); weekly=con.execute('SELECT * FROM weekly_kpis').df(); monthly=con.execute('SELECT * FROM monthly_kpis').df(); risks=con.execute('SELECT * FROM service_commercial_risk').df()
     daily.to_csv(OUT/'daily_tracker.csv',index=False)
     if not weekly.empty:
@@ -130,4 +159,4 @@ def run_pipeline(days=210,chats_per_day=190,input_path=None):
         (OUT/'monthly_executive_summary.md').write_text('\\n'.join(summary))
     con.close(); manifest={'synthetic':input_path is None,'source_file':str(input_path) if input_path else None,'rows':len(df),'tables':exports,'database':str(db.relative_to(ROOT))}; (OUT/'run_manifest.json').write_text(json.dumps(manifest,indent=2)); return manifest
 if __name__=='__main__':
-    p=argparse.ArgumentParser(); p.add_argument('--days',type=int,default=210); p.add_argument('--chats-per-day',type=int,default=190); p.add_argument('--input',help='Path to an approved chat-level CSV; if omitted, synthetic data is generated'); a=p.parse_args(); print(json.dumps(run_pipeline(a.days,a.chats_per_day,a.input),indent=2))
+    p=argparse.ArgumentParser(); p.add_argument('--days',type=int,default=210); p.add_argument('--chats-per-day',type=int,default=190); p.add_argument('--input',help='Path to an approved chat-level CSV; if omitted, synthetic data is generated'); p.add_argument('--events',help='Optional event calendar CSV with UTC start/end'); a=p.parse_args(); print(json.dumps(run_pipeline(a.days,a.chats_per_day,a.input,a.events),indent=2))
