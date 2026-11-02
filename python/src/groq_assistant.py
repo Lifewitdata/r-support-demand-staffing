@@ -8,7 +8,7 @@ import pandas as pd
 import requests
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-DEFAULT_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+DEFAULT_MODEL = os.getenv("GROQ_MODEL") or "openai/gpt-oss-120b"
 DB_PATH = Path(__file__).resolve().parents[1] / "outputs" / "commerce_analytics.duckdb"
 
 QUERY_TEMPLATES = {
@@ -56,46 +56,91 @@ def classify_question(question: str) -> str:
 
 def fetch_analytics(question: str, db_path: str | Path = DB_PATH) -> tuple[str, list[dict[str, Any]]]:
     if not Path(db_path).exists():
-        raise FileNotFoundError(f"Analytics database not found at {db_path}. Run src/commerce_analytics.py first.")
+        raise FileNotFoundError(f"Analytics database not found at {db_path}. Run python python/src/commerce_analytics.py from the repository root (or src/commerce_analytics.py from the python directory) first.")
     intent = classify_question(question)
     con = duckdb.connect(str(db_path), read_only=True)
-    try: frame = con.execute(QUERY_TEMPLATES[intent]).df()
-    finally: con.close()
+    try:
+        # Facts are labelled UTC: render timestamps in UTC regardless of the host timezone.
+        con.execute("SET TimeZone='UTC'")
+        frame = con.execute(QUERY_TEMPLATES[intent]).df()
+    finally:
+        con.close()
     return intent, frame.astype(object).where(pd.notna(frame), None).to_dict(orient="records")
 
+class GroqAPIError(RuntimeError):
+    """Groq failure with the machine-readable context callers must branch on."""
+
+    def __init__(self, message, *, status_code=None, kind="api"):
+        super().__init__(message)
+        self.status_code = status_code
+        self.kind = kind
+
+
 def groq_chat(messages: list[dict[str, str]], *, model: str = DEFAULT_MODEL,
-              temperature: float = 0.1, max_tokens: int = 900) -> str:
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key: raise RuntimeError("GROQ_API_KEY is not set. Configure it in the app environment.")
+              temperature: float = 0.1, max_tokens: int = 900, timeout: int = 45,
+              api_key: str | None = None) -> str:
+    api_key = api_key or os.getenv("GROQ_API_KEY")
+    if not api_key: raise GroqAPIError("GROQ_API_KEY is not set. Configure it in the app environment.", kind="config")
     try:
         response = requests.post(GROQ_URL,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens},
-            timeout=45, allow_redirects=False)
+            timeout=timeout, allow_redirects=False)
     except requests.RequestException as exc:
-        raise RuntimeError("Groq API request failed") from exc
+        raise GroqAPIError("Groq API request failed", kind=type(exc).__name__) from exc
     try:
         if not 200 <= response.status_code < 300:
-            raise RuntimeError(f"Groq API returned HTTP {response.status_code}")
+            raise GroqAPIError(f"Groq API returned HTTP {response.status_code}",
+                               status_code=response.status_code, kind="api")
         try:
             content = response.json()["choices"][0]["message"]["content"]
             if not isinstance(content, str) or not content.strip():
                 raise ValueError("Missing model content")
             return content.strip()
         except (ValueError, KeyError, IndexError, TypeError) as exc:
-            raise RuntimeError("Groq API returned a malformed model response") from exc
+            raise GroqAPIError("Groq API returned a malformed model response",
+                               status_code=response.status_code, kind="response") from exc
+    finally:
+        response.close()
+
+GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
+
+def list_models(*, timeout: int = 20) -> list[str]:
+    """Model identifiers the configured key can use. Only ids are returned, never the key."""
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key: raise GroqAPIError("GROQ_API_KEY is not set. Configure it in the app environment.", kind="config")
+    try:
+        response = requests.get(GROQ_MODELS_URL, headers={"Authorization": f"Bearer {api_key}"},
+                                timeout=timeout, allow_redirects=False)
+    except requests.RequestException as exc:
+        raise GroqAPIError("Groq API request failed", kind=type(exc).__name__) from exc
+    try:
+        if not 200 <= response.status_code < 300:
+            raise GroqAPIError(f"Groq API returned HTTP {response.status_code}",
+                               status_code=response.status_code, kind="api")
+        try:
+            data = response.json()["data"]
+            if not isinstance(data, list): raise ValueError("Model list is not an array")
+            ids = sorted({item["id"] for item in data
+                          if isinstance(item, dict) and isinstance(item.get("id"), str)})
+            if not ids: raise ValueError("Model list is empty")
+        except (ValueError, KeyError, TypeError) as exc:
+            raise GroqAPIError("Groq API returned a malformed model list",
+                               status_code=response.status_code, kind="response") from exc
+        return ids
     finally:
         response.close()
 
 def answer_analytics_question(question: str, db_path: str | Path = DB_PATH, *,
-                              analytics: tuple[str, list[dict[str, Any]]] | None = None) -> dict[str, Any]:
+                              analytics: tuple[str, list[dict[str, Any]]] | None = None,
+                              api_key: str | None = None) -> dict[str, Any]:
     intent, rows = analytics if analytics is not None else fetch_analytics(question, db_path)
     if not rows: return {"intent": intent, "facts": rows, "answer": "No matching analytics rows were found."}
     messages = [
         {"role": "system", "content": "You are an operations analytics assistant. Explain only supplied database facts. Do not invent causes, metrics, dates, SLAs or recommendations. Distinguish association from causation. Be concise and mention caveats."},
         {"role": "user", "content": f"Question: {redact_direct_identifiers(question)}\nAnalysis: {intent}\nDatabase results (JSON): {json.dumps(rows, allow_nan=False)}"}
     ]
-    return {"intent": intent, "facts": rows, "answer": groq_chat(messages)}
+    return {"intent": intent, "facts": rows, "answer": groq_chat(messages, api_key=api_key)}
 
 def redact_direct_identifiers(text: str) -> str:
     text = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}", "[EMAIL]", str(text))

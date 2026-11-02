@@ -77,7 +77,7 @@ check('Report wording handles increases and decreases',{
 })
 check('CSV exports write ISO timestamps, not epoch seconds',{
   for(f in c('outputs/hourly_operations.csv','outputs/holdout_predictions.csv','data/raw/future_schedule.csv'))
-    stopifnot(grepl('^\\d{4}-\\d{2}-\\d{2}T',fread(f,nrows=1,colClasses=list(character='timestamp'))$timestamp))
+    stopifnot(grepl('^[0-9]{4}-[0-9]{2}-[0-9]{2}T',fread(f,nrows=1,colClasses=list(character='timestamp'))$timestamp))
 })
 check('HTML report keeps its head and charset',{
   html <- paste(readLines('outputs/weekly_report.html',encoding='UTF-8'),collapse='\n')

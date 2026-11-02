@@ -13,3 +13,6 @@ __pycache__/
 .env.*
 python/outputs/
 python/data/raw/
+
+# Never commit local Streamlit credentials.
+**/.streamlit/secrets.toml

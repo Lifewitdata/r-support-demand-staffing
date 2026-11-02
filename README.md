@@ -113,10 +113,24 @@ Running `Rscript scripts/run_pipeline.R` rebuilds the complete synthetic demonst
 It demonstrates repeatable reporting, statistical modelling, operational deep dives, decision tools and clear handoff documentation. It does not claim stakeholder management, mentoring, measured process impact or production deployment that did not happen. See `docs/JD_alignment.md` for the precise mapping.
 
 
+## Python, SQL and Streamlit extension
+
+This repository also includes an optional Python/DuckDB analytics layer. It is separate from the R/Shiny application and uses its own synthetic conversational-commerce dataset. It generates validated KPI, forecast, risk, staffing and Tableau-ready CSV extracts.
+
+The included Streamlit entry point is a **read-only analytics question-and-answer interface** over the local DuckDB database. It is not the R/Shiny dashboard and it is not currently hosted as a public Streamlit app. Start it locally after building the database:
+
+```bash
+python -m pip install -r python/requirements.txt
+python python/src/commerce_analytics.py --days 14 --chats-per-day 30
+python -m streamlit run python/src/streamlit_app.py
+```
+
+The database is generated under `python/outputs/` and is intentionally excluded from Git. Groq explanations are optional and require `GROQ_API_KEY`; without the key, the app can still show the read-only SQL results. See [python/README.md](python/README.md) for API ingestion, forecasting, staffing, privacy and deployment details.
+
 ## Conversational commerce analytics (Python + SQL)
 
 The repository now includes a complementary Python/DuckDB analytical layer under `python/`. It adds a synthetic chat-level fact table, region-language-channel KPI grain, chronological segment forecasting, shift-pattern coverage estimates, break-adjusted capacity, operational anomaly flags, service/commercial risk alerts, workload decomposition, management reports and Tableau-ready CSV extracts.
 
 Start with [`python/README.md`](python/README.md) for setup and run instructions, [`python/docs/analytics_design.md`](python/docs/analytics_design.md) for KPI definitions and governance, and [`python/sql/analytics.sql`](python/sql/analytics.sql) for the SQL semantic layer. CI runs Python tests and a small end-to-end pipeline smoke test.
 
-All newly generated conversation data and staffing assumptions are synthetic. Staffing shifts are illustrative coverage scenarios, not an optimized employee roster or labour-compliance system. Risk thresholds are examples, not contracted SLAs. Root-cause decomposition is descriptive, not causal. Tableau workbooks will be built after the analytics outputs and validation are signed off.
+All newly generated conversation data and staffing assumptions are synthetic. Staffing shifts are illustrative coverage scenarios, not an optimized employee roster or labour-compliance system. Risk thresholds are examples, not contracted SLAs. Root-cause decomposition is descriptive, not causal. Tableau-ready extracts are generated; no Tableau workbook or published Tableau dashboard is included in this repository.
