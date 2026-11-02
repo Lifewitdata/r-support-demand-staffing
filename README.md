@@ -38,7 +38,7 @@ Rscript scripts/run_pipeline.R
 Rscript tests/run_tests.R
 ```
 
-The analysis and app are entirely R. No Python, SQL, API key, database account or paid service is required.
+The original analysis and Shiny app are entirely R. No Python, SQL, API key, database account or paid service is required to run that component; the optional Python/SQL extension is described below.
 
 ## Read the result first
 

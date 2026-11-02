@@ -1,5 +1,7 @@
 # Limits to state clearly
 
+The following limits describe the original R/Shiny component, which remains independently runnable. The separate Python/SQL extension has its own [assumptions and limitations](../python/README.md), including optional external AI processing and synthetic scheduled refreshes. It does not turn the R snapshot into a live feed or provide a Tableau workbook.
+
 - The full dataset is synthetic; patterns and incidents were generated deliberately. Findings are evidence about the scenario, not about Uber.
 - Forecasts assume the historical demand structure remains useful next week. Unknown incidents, product launches and structural changes can break that assumption.
 - Calibrated bands are approximate under dependent, changing time series. Report observed held-out coverage, not just a target percentage.
