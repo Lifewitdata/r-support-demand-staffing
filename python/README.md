@@ -1,67 +1,87 @@
 # Python + SQL conversational commerce analytics
 
-This Python/DuckDB layer extends the existing R/Shiny support-demand project. All generated records are synthetic; this is not connected to a real contact-centre platform.
+This optional Python/DuckDB layer coexists with the original R/Shiny application. Generated records are synthetic. The configurable REST adapter is not a verified connection to a live customer-support platform, and CSV extracts are not a Tableau dashboard.
 
 ## Run
 
-    cd python
-    python -m venv .venv
-    # Windows: .venv\\Scripts\\activate
-    # macOS/Linux: source .venv/bin/activate
-    pip install -r requirements.txt
-    python src/commerce_analytics.py
-    # Or use a real, approved CSV that follows the documented field contract:
-    python src/commerce_analytics.py --input data/raw/approved_conversations.csv
-    pytest -q
+From the repository root:
 
-The pipeline can generate reproducible synthetic chat records or ingest an approved chat-level CSV with `--input`. It validates the full field contract, loads DuckDB, runs the SQL semantic layer, reconciles source totals to hourly/daily totals, evaluates chronological holdout forecasts, creates a recursive seven-day forecast using a supplied future event calendar, and exports Tableau-ready CSVs.
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
+python -m pip install -r python/requirements.txt
+python -m pytest python/tests -q
+python python/src/commerce_analytics.py --days 14 --chats-per-day 30
+# Approved source and optional approved event calendar:
+python python/src/commerce_analytics.py --input approved_conversations.csv --events python/config/events.example.csv
+```
 
-## Data model
+Python 3.11 and 3.14 are the workflow test targets. Paths to SQL, the default database and extracts are resolved from the source location, not the current directory. `--output-dir` isolates generated outputs for testing or a separate refresh. Default outputs are under `python/outputs/`, with the canonical source extract under `python/data/raw/`; original root-level R datasets and outputs are untouched.
 
-- Conversation fact: one row per chat_id, with UTC timestamp, region, language, channel, market, team, timezone, concurrency, first response, handling, resolution, CSAT, conversion, revenue, reason and escalation.
-- Hourly KPI grain: complete UTC hour x region x language x channel calendar, including zero-chat hours. Local hour is derived from the row's IANA timezone rather than copied from UTC.
-- Daily, weekly and monthly grains: reporting period x region x language x channel.
-- Timezone is retained for local reporting. Convert UTC to local time with timezone-aware IANA rules in a production source adapter.
+The pipeline validates region-language consistency, UTC timestamps, IANA timezones, outcomes and metric ranges; loads DuckDB; executes both SQL scripts; checks additive totals at every reporting grain; evaluates recursive chronological forecasts; produces a seven-day forward forecast; and writes management reports and CSV extracts. Invalid inputs are rejected before replacing output files. Database schema changes are transactional, but the complete multi-file export is not atomically published; use a staging directory for production delivery.
+
+## Data model and ingestion contract
+
+Required columns: `chat_id,arrived_at_utc,region,language,channel,market,team,local_timezone,event_type,concurrency,first_response_minutes,handling_minutes,resolved,csat,converted,revenue,contact_reason,escalated`.
+
+- One conversation fact row per unique, nonblank chat ID.
+- Required dimensions cannot be missing or blank. Region/language must match the documented AMER, EMEA or APAC language pools in the source.
+- `local_hour` is recalculated from UTC and an IANA timezone. Naive source timestamps are interpreted as UTC; providers must normalize their source timezone before ingestion.
+- Required metrics must be finite numeric values; concurrency is a positive integer and outcome flags are 0/1. CSAT may be null for unsurveyed chats, otherwise it must be 1–5. Unconverted chats must have zero revenue.
+- Hourly grain is a complete UTC hour × observed region/language/channel segment spine, including zero-chat hours. Empty-hour rates remain null, not fabricated zeros. A modal local hour is descriptive and is null in empty hours; it cannot represent multiple timezones precisely.
+- Daily, weekly and monthly KPI grains are UTC period × region × language × channel. Weeks start Monday. A separate daily `team_kpis` extract includes team without duplicating pooled staffing.
 
 ## API ingestion
 
-A vendor-neutral REST adapter is provided in `src/api_ingestion.py`. It uses a bearer token from environment variables and a field mapping file; it does not assume Zendesk, Intercom, Freshdesk or another vendor's schema.
+`src/api_ingestion.py` supports a configurable JSON REST response and field mapping; it does not assume a vendor schema. Only explicitly mapped canonical fields are exported. Full canonical validation precedes atomic replacement of the individual API CSV.
 
-    export SUPPORT_API_URL="https://your-support-platform.example/api/conversations"
-    export SUPPORT_API_TOKEN="your-token"
-    python src/api_ingestion.py --mapping config/api_field_mapping.example.json
-    python src/commerce_analytics.py --input data/raw/api_conversations.csv --events config/events.example.csv
+Set `SUPPORT_API_URL` to the approved HTTPS endpoint and `SUPPORT_API_TOKEN` in the environment, then run from the repository root:
 
-On Windows PowerShell, set environment variables with `$env:SUPPORT_API_URL` and `$env:SUPPORT_API_TOKEN`. Never commit credentials. The example field mapping is illustrative and must be matched to the actual provider's response fields and pagination contract.
+```bash
+python python/src/api_ingestion.py --mapping python/config/api_field_mapping.example.json --output python/data/raw/api_conversations.csv
+python python/src/commerce_analytics.py --input python/data/raw/api_conversations.csv
+```
+
+On PowerShell use `$env:SUPPORT_API_URL` and `$env:SUPPORT_API_TOKEN`. Pagination is restricted to the same HTTPS origin; redirects and credentials embedded in URLs are rejected. Confirm the provider's field mapping, records/next paths and pagination behavior before use. API responses are mocked in tests; no live connection is claimed. Never commit tokens, `.env` files or approved private datasets.
 
 ## Employee-level shift planning
 
-Prepare a roster using `config/employee_roster.example.csv`, then run:
+The separate greedy employee planner uses an approved roster following `config/employee_roster.example.csv`:
 
-    python src/workforce_optimizer.py --demand outputs/tableau_staffing_coverage.csv --employees data/raw/employee_roster.csv
+```bash
+python python/src/workforce_optimizer.py --demand python/outputs/tableau_staffing_coverage.csv --employees python/config/employee_roster.example.csv --output python/outputs/employee_shift_schedule.csv
+```
 
-The heuristic allocates employees only to matching region, language and channel demand. It supports a scheduled break, employee availability windows, leave windows, daily/weekly hour caps and minimum rest between shifts. Outputs are `outputs/employee_shift_schedule.csv` and `outputs/employee_shift_coverage.csv`. It is a transparent greedy heuristic, not a globally optimal solver; validate local employment law, contracts, time zones, daylight-saving transitions, split shifts, overtime, employee preferences and collective agreements before operational use.
+An employee covers at most one eligible region/language/channel segment per productive hour. Availability, leave, complete break intervals, UTC daily/ISO-week productive-hour caps and minimum rest are enforced. Outputs include the shift schedule and `employee_shift_coverage.csv`; unfilled demand remains explicit. The chronological greedy selection is not globally optimal and can miss earlier feasible shifts after selecting a later one. Caps refer to productive hours, not jurisdiction-specific paid employment time. Validate contracts, certifications, local time, overtime, preferences and labour law before operational use.
 
-## Event calendar
+## Event calendar and forecasting
 
-Supply a CSV with `event_id,region,language,channel,event_type,start_utc,end_utc`. Region/language/channel may be `*` to apply across all segments. Supported event types are campaign, holiday, product_launch and incident. The calendar affects future forecast regressors and produces a descriptive event-overlap extract. Event overlap is not causal attribution.
+Supply `event_id,region,language,channel,event_type,start_utc,end_utc`. IDs must be unique; dimensions may be `*` (`ALL`/`all` are normalized); supported types are campaign, holiday, product_launch and incident. Intervals are start-inclusive/end-exclusive. Forecast flags mark hours overlapping the supplied event interval. Descriptive SQL overlap counts use actual conversation timestamps. Overlapping event totals are not additive and do not establish causal impact.
+
+The model uses Random Forest when training history is sufficient, otherwise seasonal-naive. Lagged demand and rolling means are computed only from prior observations/predictions. Holdout evaluation is recursive from a fixed chronological origin and includes empty hours. Realized chat-level event proportions are not forecast inputs: only supplied calendar flags are used, with zero defaults when absent. For evaluation, the supplied calendar is assumed known in advance; this assumption must be checked against real announcement dates. Synthetic random event labels do not prove a useful event-sensitive model.
+
+`forecast_holdout.csv` and `forecast_scores.csv` contain evaluation results; `forecast_next_7_days.csv` contains 168 future hours per observed segment and the event assumption. MAE/RMSE and WAPE are reported; WAPE is null when actual volume sums to zero. Insufficient evaluation history produces header-only evaluation CSVs, while a short-history forward baseline is still available. There are no calibrated prediction intervals or guaranteed forecast improvements.
+
+## SQL assumptions and Tableau handoff
+
+The coverage model uses fixed illustrative 85% occupancy, 25% shrinkage, UTC day/evening/night pool schedules and a separate 10% break allowance. Capacity is allocated across channels by workload to avoid counting the same pool repeatedly. SQL staffing is a scenario, not the employee planner's realized roster; it does not use conversation concurrency to divide handling workload. Review whether shrinkage already includes breaks before operational use. Gap cost is illustrative agent-hour cost, not measured lost revenue or savings. Risk thresholds are hardcoded examples, not contracted SLAs. Workload volume/AHT decomposition is arithmetic and associational, not causal.
+
+Import `tableau_hourly_commerce.csv`, staffing, risk, anomaly, root-cause, daily/weekly/monthly/team KPI, event overlap and reconciliation extracts from the output directory. Filter by UTC date, region, language, channel and (in the team extract) team. Use additive numerator/count columns to recompute weighted rates; never average segment averages. Reconciliation checks eight counts/sums across source, hourly, daily, weekly, monthly and team grains. Each generated weekly/monthly narrative summarizes all segments for its latest UTC period.
+
+No Tableau workbook, published dashboard, hosted Streamlit app or verified live provider connection is included.
+
+## Optional Groq and Streamlit
+
+```bash
+python -m streamlit run python/src/streamlit_app.py --server.headless true
+python python/src/analyse_conversations.py --input python/config/conversation_text.example.csv --output python/outputs/conversation_insights.csv
+```
+
+Streamlit displays reviewed, read-only SQL results without a key; explanations and the conversation CLI require `GROQ_API_KEY`. `GROQ_MODEL` selects the model. See [docs/groq_ai_layer.md](docs/groq_ai_layer.md) for privacy controls and limitations. Mocked HTTP/model responses validate integration contracts; they do not verify live Groq access or model quality.
 
 ## Automated refresh
 
-GitHub Actions runs the reproducible analytics pipeline daily and archives the generated outputs as a workflow artifact. This scheduled run is synthetic unless a provider-specific API integration and credentials are configured. The generic REST adapter can be run locally or wired into the workflow after the provider and field mapping are confirmed.
+The GitHub Actions workflow tests Python 3.11/3.14 without live secrets, executes a synthetic smoke pipeline on code changes, and uses the full synthetic refresh for the daily schedule. Tests execute all SQL views against real DuckDB fixtures. Test reports and validated output files are archived as artifacts, not committed or deployed. Scheduled workflows run from `main`, so the updated schedule is effective only after review and merge. No R report refresh or Pages publication is added by this workflow. Optional live integrations must use GitHub Actions secrets and require separate provider configuration; no secret is needed by the supplied workflow.
 
-## Analytical assumptions and limits
-
-- Forecasting uses a Random Forest per region/language/channel where history is sufficient, otherwise seasonal-naive. Holdout metrics are MAE, RMSE and WAPE. This is a baseline, not a guarantee.
-- The SQL coverage model uses illustrative 85% occupancy and 25% shrinkage. The separate employee planner handles skills, availability, leave, a fixed break and hour/rest caps, but remains a greedy heuristic and does not encode certifications, contracts, preferences or jurisdiction-specific labour rules.
-- Risk thresholds are starter assumptions, not contracted SLAs. Alerts are flags, not proof of service failure.
-- Converted revenue is observed synthetic revenue, not estimated lost revenue.
-- Volume/AHT root-cause decomposition is arithmetic and associational, not causal.
-
-## Tableau handoff
-
-Use outputs/tableau_hourly_commerce.csv, tableau_staffing_coverage.csv, tableau_service_commercial_risk.csv, tableau_operational_anomalies.csv, tableau_root_cause_decomposition.csv and the daily/weekly/monthly KPI exports. Filter by region, language, channel and date. Use hour_utc for globally consistent hourly analysis.
-
-## Ingestion contract
-
-Use `--input path/to/file.csv` to ingest an approved CSV. Required fields are: chat_id, arrived_at_utc, region, language, channel, market, team, local_timezone, event_type, concurrency, first_response_minutes, handling_minutes, resolved, csat, converted, revenue, contact_reason and escalated. `local_hour` is recalculated from UTC and the IANA timezone. Invalid batches are rejected; missing region/language is never silently imputed. A vendor-specific API connector, production credential configuration, source checksum and fully managed ingestion service are not included.
+See [docs/analytics_design.md](docs/analytics_design.md) for metric definitions and governance.
