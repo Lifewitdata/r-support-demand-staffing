@@ -205,8 +205,5 @@ def test_streamlit_failure_and_sql_facts_paths(monkeypatch, mode):
             answer.assert_not_called()
         else:
             assert answer.call_args.kwargs["analytics"] == ("overview", [{"chats": 1}])
-            if mode == "streamlit_secret":
-                assert answer.call_args.kwargs["api_key"] == "test-only-placeholder"
-            else:
-                assert answer.call_args.kwargs["api_key"] is None
+            assert answer.call_args.kwargs["api_key"] == "test-only-placeholder"
             st.error.assert_called_once_with("mock API error")
