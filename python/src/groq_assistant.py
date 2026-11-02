@@ -8,7 +8,7 @@ import pandas as pd
 import requests
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-DEFAULT_MODEL = os.getenv("GROQ_MODEL") or "llama-3.3-70b-versatile"
+DEFAULT_MODEL = os.getenv("GROQ_MODEL") or "openai/gpt-oss-120b"
 DB_PATH = Path(__file__).resolve().parents[1] / "outputs" / "commerce_analytics.duckdb"
 
 QUERY_TEMPLATES = {

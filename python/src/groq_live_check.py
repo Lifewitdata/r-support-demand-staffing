@@ -87,8 +87,9 @@ def check_models(model: str, db_path: Path) -> dict[str, Any]:
 
 
 def check_connectivity(model: str, db_path: Path) -> dict[str, Any]:
+    # Headroom above the literal answer: current chat models bill reasoning against max_tokens.
     reply = _validated_text(call_with_retry(lambda: groq_chat(
-        [{"role": "user", "content": "Reply with exactly: OK"}], model=model, temperature=0, max_tokens=8)))
+        [{"role": "user", "content": "Reply with exactly: OK"}], model=model, temperature=0, max_tokens=200)))
     return {"check": "connectivity", "status": "PASS", "detail": "non-empty model reply",
             "echo_matched": "ok" in reply.lower()}
 
@@ -144,7 +145,7 @@ def run(db_path: Path, model: str, selected: list[str], retries: int) -> tuple[l
             results.append(result)
         except (LiveCheckFailed, GroqAPIError, ValueError, OSError) as error:
             failed += 1
-            reason = scrub(str(error))
+            reason = scrub(classify(error)[0] if isinstance(error, GroqAPIError) else str(error))
             results.append({"check": name, "status": "FAIL", "reason": reason,
                             "duration_ms": int((time.monotonic() - started) * 1000)})
             print(f"FAIL {name}: {reason}", file=sys.stderr)

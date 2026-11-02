@@ -89,10 +89,10 @@ def test_models_check_runs_first_by_default():
 
 
 def test_models_check_reports_availability(monkeypatch):
-    monkeypatch.setattr(live, "list_models", Mock(return_value=["a-model", "llama-3.3-70b-versatile"]))
-    result = live.check_models("llama-3.3-70b-versatile", Path("unused.duckdb"))
+    monkeypatch.setattr(live, "list_models", Mock(return_value=["a-model", "z-model"]))
+    result = live.check_models("z-model", Path("unused.duckdb"))
     assert result["status"] == "PASS" and result["model_available"] is True
-    assert result["model_count"] == 2 and result["model_requested"] == "llama-3.3-70b-versatile"
+    assert result["model_count"] == 2 and result["model_requested"] == "z-model"
 
 
 def test_models_check_flags_a_retired_model(monkeypatch):
