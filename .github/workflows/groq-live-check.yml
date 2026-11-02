@@ -1,6 +1,9 @@
 name: Groq live API verification
 # Opt-in only: this workflow makes real Groq API calls and consumes quota.
 # Normal CI (python-analytics.yml) never needs credentials and stays fully mocked.
+# Two opt-in routes: manual dispatch, or the label verify:groq-live on a same-repository pull request.
+# workflow_dispatch is only listed in the Actions UI once the file exists on the default branch,
+# so the labelled pull request is the way to run this before a merge.
 on:
   workflow_dispatch:
     inputs:
@@ -13,6 +16,8 @@ on:
         required: false
         default: connectivity,analytics_assistant,conversation_analysis,prompt_injection
         type: string
+  pull_request:
+    types: [opened, labeled, reopened]
 permissions:
   contents: read
 concurrency:
@@ -22,12 +27,18 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       contains(github.event.pull_request.labels.*.name, 'verify:groq-live'))
     defaults:
       run:
         working-directory: python
     env:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       GROQ_MODEL: ${{ inputs.model }}
+      LIVE_CHECKS: ${{ inputs.checks || 'connectivity,analytics_assistant,conversation_analysis,prompt_injection' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -47,7 +58,7 @@ jobs:
         run: python src/commerce_analytics.py --days 14 --chats-per-day 30 --events config/events.example.csv
       - name: Run live Groq verification
         shell: bash
-        run: python src/groq_live_check.py --checks "${{ inputs.checks }}" --json | tee groq-live-check.json
+        run: python src/groq_live_check.py --checks "$LIVE_CHECKS" --json | tee groq-live-check.json
       - name: Publish the redacted result
         if: always()
         run: |
