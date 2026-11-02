@@ -1,0 +1,4 @@
+employee_id,region,languages,channels,max_daily_hours,max_weekly_hours,available_from_utc,available_to_utc,leave_start_utc,leave_end_utc
+AGENT-001,APAC,en|hi,live_chat|in_app,8,40,,,,
+AGENT-002,EMEA,en|fr|de,live_chat|web,8,40,,,,
+AGENT-003,AMER,en|es|pt,live_chat|in_app|web,8,40,,,,
