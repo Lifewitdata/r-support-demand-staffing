@@ -63,12 +63,14 @@ def test_redaction():
 
 
 def test_groq_success(monkeypatch):
-    monkeypatch.setenv("GROQ_API_KEY", "test-only-placeholder")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     response = Mock(status_code=200)
     response.json.return_value = {"choices": [{"message": {"content": "  Answer\n"}}]}
     post = Mock(return_value=response)
     monkeypatch.setattr(requests, "post", post)
-    assert groq.groq_chat([{"role": "user", "content": "hello"}]) == "Answer"
+    assert groq.groq_chat(
+        [{"role": "user", "content": "hello"}], api_key="test-only-placeholder"
+    ) == "Answer"
     assert post.call_args.kwargs["allow_redirects"] is False
     assert post.call_args.kwargs["timeout"] == 45
     response.close.assert_called_once()
@@ -171,7 +173,7 @@ def test_empty_facts_no_api(monkeypatch):
     chat.assert_not_called()
 
 
-@pytest.mark.parametrize("mode", ["missing_db", "no_key", "api_error"])
+@pytest.mark.parametrize("mode", ["missing_db", "no_key", "api_error", "streamlit_secret"])
 def test_streamlit_failure_and_sql_facts_paths(monkeypatch, mode):
     class Stop(Exception):
         pass
@@ -179,6 +181,8 @@ def test_streamlit_failure_and_sql_facts_paths(monkeypatch, mode):
     st.text_input.return_value = "overview"
     st.button.return_value = True
     st.stop.side_effect = Stop
+    if mode == "streamlit_secret":
+        st.secrets = {"GROQ_API_KEY": "test-only-placeholder"}
     monkeypatch.setitem(sys.modules, "streamlit", st)
     monkeypatch.setattr(groq, "DB_PATH", SimpleNamespace(exists=lambda: mode != "missing_db"))
     fetch = Mock(return_value=("overview", [{"chats": 1}]))
@@ -201,4 +205,8 @@ def test_streamlit_failure_and_sql_facts_paths(monkeypatch, mode):
             answer.assert_not_called()
         else:
             assert answer.call_args.kwargs["analytics"] == ("overview", [{"chats": 1}])
+            if mode == "streamlit_secret":
+                assert answer.call_args.kwargs["api_key"] == "test-only-placeholder"
+            else:
+                assert answer.call_args.kwargs["api_key"] is None
             st.error.assert_called_once_with("mock API error")
