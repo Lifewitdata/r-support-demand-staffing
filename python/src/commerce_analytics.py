@@ -26,6 +26,8 @@ def validate_chats(df):
     if missing: raise ValueError('Missing columns: '+str(missing))
     if df.chat_id.isna().any() or df.chat_id.duplicated().any(): raise ValueError('chat_id must be unique and non-null')
     if df[['region','language','channel','market','team','local_timezone']].isna().any().any(): raise ValueError('Missing operational dimensions')
+    if df[['arrived_at_utc','first_response_minutes','handling_minutes','resolved','converted','revenue']].isna().any().any(): raise ValueError('Missing required metric values')
+    if not df.resolved.isin([0,1]).all() or not df.converted.isin([0,1]).all(): raise ValueError('Resolution and conversion must be binary')
     if not set(df.region).issubset(REGIONS): raise ValueError('Unknown region')
     if (df[['first_response_minutes','handling_minutes','revenue']]<0).any().any(): raise ValueError('Negative metric')
     if not df.csat.dropna().between(1,5).all(): raise ValueError('CSAT outside 1..5')
@@ -46,8 +48,8 @@ def build_forecast(hourly):
         preds.append(pd.DataFrame({'hour_utc':te.hour_utc,'region':keys[0],'language':keys[1],'channel':keys[2],'actual_chats':y,'predicted_chats':np.round(p,2),'model':name}))
     return (pd.concat(preds,ignore_index=True) if preds else pd.DataFrame(),pd.DataFrame(scores))
 def run_pipeline(days=210,chats_per_day=190):
-    RAW.mkdir(parents=True,exist_ok=True); OUT.mkdir(parents=True,exist_ok=True); df=generate_data(days=days,chats_per_day=chats_per_day); validate_chats(df)
-    df.to_csv(RAW/'conversations.csv',index=False); pd.DataFrame([{'rows':len(df),'status':'PASS'}]).to_csv(OUT/'data_quality.csv',index=False)
+    RAW.mkdir(parents=True,exist_ok=True); OUT.mkdir(parents=True,exist_ok=True); df=generate_data(days=days,chats_per_day=chats_per_day); dq=validate_chats(df)
+    df.to_csv(RAW/'conversations.csv',index=False); dq.to_csv(OUT/'data_quality.csv',index=False)
     db=OUT/'commerce_analytics.duckdb'; con=duckdb.connect(str(db)); con.register('incoming',df); con.execute('CREATE OR REPLACE TABLE conversations AS SELECT * FROM incoming'); con.execute((ROOT/'sql'/'analytics.sql').read_text())
     names=['hourly_commerce','staffing_coverage','service_commercial_risk','operational_anomalies','root_cause_decomposition','daily_kpis','weekly_kpis','monthly_kpis']
     exports={}
