@@ -206,4 +206,4 @@ def test_streamlit_failure_and_sql_facts_paths(monkeypatch, mode):
         else:
             assert answer.call_args.kwargs["analytics"] == ("overview", [{"chats": 1}])
             assert answer.call_args.kwargs["api_key"] == "test-only-placeholder"
-            st.error.assert_called_once_with("mock API error")
+            st.error.assert_called_once_with("The analytics request could not be completed. Check the app logs and configuration.")
