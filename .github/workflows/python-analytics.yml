@@ -6,6 +6,8 @@ on:
   pull_request:
     paths: ['python/**', '.github/workflows/python-analytics.yml']
   workflow_dispatch:
+  schedule:
+    - cron: '17 2 * * *'
 jobs:
   test:
     runs-on: ubuntu-latest
