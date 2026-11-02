@@ -5,3 +5,11 @@ renv/library/
 renv/staging/
 *.log
 # Prepared app data are deliberately included so the Shiny app opens after upload.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv*/
+.env
+.env.*
+python/outputs/
+python/data/raw/
