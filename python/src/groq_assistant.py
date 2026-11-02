@@ -102,6 +102,34 @@ def groq_chat(messages: list[dict[str, str]], *, model: str = DEFAULT_MODEL,
     finally:
         response.close()
 
+GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
+
+def list_models(*, timeout: int = 20) -> list[str]:
+    """Model identifiers the configured key can use. Only ids are returned, never the key."""
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key: raise GroqAPIError("GROQ_API_KEY is not set. Configure it in the app environment.", kind="config")
+    try:
+        response = requests.get(GROQ_MODELS_URL, headers={"Authorization": f"Bearer {api_key}"},
+                                timeout=timeout, allow_redirects=False)
+    except requests.RequestException as exc:
+        raise GroqAPIError("Groq API request failed", kind=type(exc).__name__) from exc
+    try:
+        if not 200 <= response.status_code < 300:
+            raise GroqAPIError(f"Groq API returned HTTP {response.status_code}",
+                               status_code=response.status_code, kind="api")
+        try:
+            data = response.json()["data"]
+            if not isinstance(data, list): raise ValueError("Model list is not an array")
+            ids = sorted({item["id"] for item in data
+                          if isinstance(item, dict) and isinstance(item.get("id"), str)})
+            if not ids: raise ValueError("Model list is empty")
+        except (ValueError, KeyError, TypeError) as exc:
+            raise GroqAPIError("Groq API returned a malformed model list",
+                               status_code=response.status_code, kind="response") from exc
+        return ids
+    finally:
+        response.close()
+
 def answer_analytics_question(question: str, db_path: str | Path = DB_PATH, *,
                               analytics: tuple[str, list[dict[str, Any]]] | None = None) -> dict[str, Any]:
     intent, rows = analytics if analytics is not None else fetch_analytics(question, db_path)

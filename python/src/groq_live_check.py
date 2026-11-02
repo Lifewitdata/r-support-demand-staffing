@@ -13,12 +13,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from conversation_insights import analyse_conversation_batch
 from groq_assistant import (DEFAULT_MODEL, DB_PATH, GroqAPIError, answer_analytics_question,
-                            fetch_analytics, groq_chat)
+                            fetch_analytics, groq_chat, list_models)
 
 AUTH_STATUSES = {401, 403}
 RETRY_STATUSES = {429, 502, 503, 504}
 TIMEOUT_KINDS = {"Timeout", "ConnectTimeout", "ReadTimeout", "ConnectionError", "ChunkedEncodingError"}
 MAX_ANSWER_CHARS = 6000
+MAX_MODEL_IDS = 60
 
 
 class LiveCheckFailed(Exception):
@@ -44,6 +45,9 @@ def classify(error: GroqAPIError) -> tuple[str, bool]:
         return f"Groq rejected the configured credential (HTTP {status})", False
     if status in RETRY_STATUSES:
         return f"Groq is rate limiting or unavailable (HTTP {status})", True
+    if status == 404:
+        return ("Groq returned HTTP 404: the requested model id or endpoint does not exist. "
+                "Run --checks models to list the model ids this key can use"), False
     if kind == "response":
         return "Groq returned a malformed model response", True
     if kind in TIMEOUT_KINDS:
@@ -72,6 +76,14 @@ def _validated_text(value: str) -> str:
     if scrub(value) != value:
         raise LiveCheckFailed("Model response contained the configured API key")
     return value.strip()
+
+
+def check_models(model: str, db_path: Path) -> dict[str, Any]:
+    """Report the model ids this key can use, so an HTTP 404 is resolved from evidence, not guesses."""
+    ids = call_with_retry(list_models)
+    return {"check": "models", "status": "PASS", "model_requested": model,
+            "model_available": model in ids, "model_count": len(ids),
+            "available_models": ids[:MAX_MODEL_IDS]}
 
 
 def check_connectivity(model: str, db_path: Path) -> dict[str, Any]:
@@ -117,7 +129,8 @@ def check_prompt_injection(model: str, db_path: Path) -> dict[str, Any]:
     return {"check": "prompt_injection", "status": "PASS", "detail": "row contract held"}
 
 
-CHECKS = {"connectivity": check_connectivity, "analytics_assistant": check_analytics,
+CHECKS = {"models": check_models, "connectivity": check_connectivity,
+          "analytics_assistant": check_analytics,
           "conversation_analysis": check_conversation_analysis, "prompt_injection": check_prompt_injection}
 
 
