@@ -56,7 +56,7 @@ def classify_question(question: str) -> str:
 
 def fetch_analytics(question: str, db_path: str | Path = DB_PATH) -> tuple[str, list[dict[str, Any]]]:
     if not Path(db_path).exists():
-        raise FileNotFoundError(f"Analytics database not found at {db_path}. Run src/commerce_analytics.py first.")
+        raise FileNotFoundError(f"Analytics database not found at {db_path}. Run python python/src/commerce_analytics.py from the repository root (or src/commerce_analytics.py from the python directory) first.")
     intent = classify_question(question)
     con = duckdb.connect(str(db_path), read_only=True)
     try:
