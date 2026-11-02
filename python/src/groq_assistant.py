@@ -8,7 +8,7 @@ import pandas as pd
 import requests
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-DEFAULT_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+DEFAULT_MODEL = os.getenv("GROQ_MODEL") or "llama-3.3-70b-versatile"
 DB_PATH = Path(__file__).resolve().parents[1] / "outputs" / "commerce_analytics.duckdb"
 
 QUERY_TEMPLATES = {
@@ -59,31 +59,46 @@ def fetch_analytics(question: str, db_path: str | Path = DB_PATH) -> tuple[str, 
         raise FileNotFoundError(f"Analytics database not found at {db_path}. Run src/commerce_analytics.py first.")
     intent = classify_question(question)
     con = duckdb.connect(str(db_path), read_only=True)
-    try: frame = con.execute(QUERY_TEMPLATES[intent]).df()
-    finally: con.close()
+    try:
+        # Facts are labelled UTC: render timestamps in UTC regardless of the host timezone.
+        con.execute("SET TimeZone='UTC'")
+        frame = con.execute(QUERY_TEMPLATES[intent]).df()
+    finally:
+        con.close()
     return intent, frame.astype(object).where(pd.notna(frame), None).to_dict(orient="records")
 
+class GroqAPIError(RuntimeError):
+    """Groq failure with the machine-readable context callers must branch on."""
+
+    def __init__(self, message, *, status_code=None, kind="api"):
+        super().__init__(message)
+        self.status_code = status_code
+        self.kind = kind
+
+
 def groq_chat(messages: list[dict[str, str]], *, model: str = DEFAULT_MODEL,
-              temperature: float = 0.1, max_tokens: int = 900) -> str:
+              temperature: float = 0.1, max_tokens: int = 900, timeout: int = 45) -> str:
     api_key = os.getenv("GROQ_API_KEY")
-    if not api_key: raise RuntimeError("GROQ_API_KEY is not set. Configure it in the app environment.")
+    if not api_key: raise GroqAPIError("GROQ_API_KEY is not set. Configure it in the app environment.", kind="config")
     try:
         response = requests.post(GROQ_URL,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens},
-            timeout=45, allow_redirects=False)
+            timeout=timeout, allow_redirects=False)
     except requests.RequestException as exc:
-        raise RuntimeError("Groq API request failed") from exc
+        raise GroqAPIError("Groq API request failed", kind=type(exc).__name__) from exc
     try:
         if not 200 <= response.status_code < 300:
-            raise RuntimeError(f"Groq API returned HTTP {response.status_code}")
+            raise GroqAPIError(f"Groq API returned HTTP {response.status_code}",
+                               status_code=response.status_code, kind="api")
         try:
             content = response.json()["choices"][0]["message"]["content"]
             if not isinstance(content, str) or not content.strip():
                 raise ValueError("Missing model content")
             return content.strip()
         except (ValueError, KeyError, IndexError, TypeError) as exc:
-            raise RuntimeError("Groq API returned a malformed model response") from exc
+            raise GroqAPIError("Groq API returned a malformed model response",
+                               status_code=response.status_code, kind="response") from exc
     finally:
         response.close()
 
