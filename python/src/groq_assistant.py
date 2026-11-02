@@ -1,6 +1,6 @@
 """Groq explanations over a read-only, allow-listed DuckDB analytics layer."""
 from __future__ import annotations
-import os, re
+import json, os, re
 from pathlib import Path
 from typing import Any
 import duckdb
@@ -23,6 +23,10 @@ FROM conversations GROUP BY region ORDER BY chats DESC""",
 "language": """SELECT region, language, COUNT(*) AS chats, ROUND(AVG(first_response_minutes),2) AS avg_first_response_minutes,
 ROUND(AVG(resolved::INT),4) AS resolution_rate, ROUND(AVG(csat),2) AS avg_csat
 FROM conversations GROUP BY region, language ORDER BY chats DESC LIMIT 20""",
+"team": """SELECT team, COUNT(*) AS chats, ROUND(AVG(first_response_minutes),2) AS avg_first_response_minutes,
+ROUND(AVG(handling_minutes),2) AS avg_handling_minutes, ROUND(AVG(resolved::INT),4) AS resolution_rate,
+ROUND(AVG(csat),2) AS avg_csat, ROUND(AVG(converted::INT),4) AS conversion_rate,
+ROUND(SUM(revenue),2) AS converted_revenue FROM conversations GROUP BY team ORDER BY chats DESC""",
 "channel": """SELECT channel, COUNT(*) AS chats, ROUND(AVG(first_response_minutes),2) AS avg_first_response_minutes,
 ROUND(AVG(handling_minutes),2) AS avg_handling_minutes, ROUND(AVG(csat),2) AS avg_csat,
 ROUND(AVG(converted::INT),4) AS conversion_rate FROM conversations GROUP BY channel ORDER BY chats DESC""",
@@ -46,6 +50,7 @@ def classify_question(question: str) -> str:
     if any(x in q for x in ("reason", "contact driver", "why contact", "issue type", "customer issue")): return "reasons"
     if any(x in q for x in ("language", "locale")): return "language"
     if any(x in q for x in ("channel", "live chat", "in-app", "web channel")): return "channel"
+    if any(x in q for x in ("team", "payments", "retention", "core support")): return "team"
     if any(x in q for x in ("region", "amer", "emea", "apac")): return "region"
     return "overview"
 
@@ -56,28 +61,39 @@ def fetch_analytics(question: str, db_path: str | Path = DB_PATH) -> tuple[str, 
     con = duckdb.connect(str(db_path), read_only=True)
     try: frame = con.execute(QUERY_TEMPLATES[intent]).df()
     finally: con.close()
-    return intent, frame.where(pd.notna(frame), None).to_dict(orient="records")
+    return intent, frame.astype(object).where(pd.notna(frame), None).to_dict(orient="records")
 
 def groq_chat(messages: list[dict[str, str]], *, model: str = DEFAULT_MODEL,
               temperature: float = 0.1, max_tokens: int = 900) -> str:
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key: raise RuntimeError("GROQ_API_KEY is not set. Configure it in the app environment.")
-    response = requests.post(GROQ_URL,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens},
-        timeout=45)
-    if response.status_code >= 400:
-        try: detail = response.json().get("error", {}).get("message", response.reason)
-        except ValueError: detail = response.reason
-        raise RuntimeError(f"Groq API returned HTTP {response.status_code}: {detail}")
-    return response.json()["choices"][0]["message"]["content"].strip()
+    try:
+        response = requests.post(GROQ_URL,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens},
+            timeout=45, allow_redirects=False)
+    except requests.RequestException as exc:
+        raise RuntimeError("Groq API request failed") from exc
+    try:
+        if not 200 <= response.status_code < 300:
+            raise RuntimeError(f"Groq API returned HTTP {response.status_code}")
+        try:
+            content = response.json()["choices"][0]["message"]["content"]
+            if not isinstance(content, str) or not content.strip():
+                raise ValueError("Missing model content")
+            return content.strip()
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError("Groq API returned a malformed model response") from exc
+    finally:
+        response.close()
 
-def answer_analytics_question(question: str, db_path: str | Path = DB_PATH) -> dict[str, Any]:
-    intent, rows = fetch_analytics(question, db_path)
+def answer_analytics_question(question: str, db_path: str | Path = DB_PATH, *,
+                              analytics: tuple[str, list[dict[str, Any]]] | None = None) -> dict[str, Any]:
+    intent, rows = analytics if analytics is not None else fetch_analytics(question, db_path)
     if not rows: return {"intent": intent, "facts": rows, "answer": "No matching analytics rows were found."}
     messages = [
         {"role": "system", "content": "You are an operations analytics assistant. Explain only supplied database facts. Do not invent causes, metrics, dates, SLAs or recommendations. Distinguish association from causation. Be concise and mention caveats."},
-        {"role": "user", "content": f"Question: {question}\\nAnalysis: {intent}\\nDatabase results (JSON): {rows}"}
+        {"role": "user", "content": f"Question: {redact_direct_identifiers(question)}\nAnalysis: {intent}\nDatabase results (JSON): {json.dumps(rows, allow_nan=False)}"}
     ]
     return {"intent": intent, "facts": rows, "answer": groq_chat(messages)}
 
