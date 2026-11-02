@@ -184,7 +184,7 @@ def run_pipeline(days=210,chats_per_day=190,input_path=None,events_path=None):
     df=_with_local_hour(df); dq=validate_chats(df)
     df.to_csv(RAW/'conversations.csv',index=False); dq.to_csv(OUT/'data_quality.csv',index=False)
     db=OUT/'commerce_analytics.duckdb'; con=duckdb.connect(str(db)); con.register('incoming',df); con.execute('CREATE OR REPLACE TABLE conversations AS SELECT * FROM incoming'); con.execute((ROOT/'sql'/'analytics.sql').read_text())
-    events=load_event_calendar(events_path) if events_path else pd.DataFrame(columns=['event_id','region','language','channel','event_type','start_utc','end_utc'])
+    events=load_event_calendar(events_path) if events_path else pd.DataFrame({'event_id':pd.Series(dtype='str'),'region':pd.Series(dtype='str'),'language':pd.Series(dtype='str'),'channel':pd.Series(dtype='str'),'event_type':pd.Series(dtype='str'),'start_utc':pd.Series(dtype='datetime64[ns, UTC]'),'end_utc':pd.Series(dtype='datetime64[ns, UTC]')})
     con.register('event_input',events); con.execute('CREATE OR REPLACE TABLE event_calendar AS SELECT * FROM event_input')
     con.execute((ROOT/'sql'/'reconciliation.sql').read_text())
     names=['hourly_commerce','staffing_coverage','service_commercial_risk','operational_anomalies','root_cause_decomposition','daily_kpis','weekly_kpis','monthly_kpis','data_reconciliation','event_calendar_impact']
