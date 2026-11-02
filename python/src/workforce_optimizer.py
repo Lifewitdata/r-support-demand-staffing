@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 
 def _tokens(value):
-    return {x.strip().lower() for x in str(value or "").split(";") if x.strip()}
+    return {x.strip().lower() for x in str(value or "").split("|") if x.strip()}
 
 def optimise_shifts(demand, employees, shift_hours=8, break_after=4, break_hours=1,
                     max_daily_hours=8, max_weekly_hours=40, min_rest_hours=11):
